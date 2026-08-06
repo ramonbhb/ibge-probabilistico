@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import duckdb
 
 from features import normalize_date_sql
+
+# Distingue "argumento não informado" de "None = sem filtro", já que None é
+# um valor válido para FILTRO_UF/FILTRO_MUNICIPIO.
+_UNSET: Any = object()
 
 
 def normalize_uf_filtro(filtro: str | int | float | None) -> str | None:
@@ -99,11 +104,35 @@ if _env_mun:
     FILTRO_MUNICIPIO = _env_mun
 FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
 
+
+def set_filtros(
+    *,
+    uf: str | int | float | None = _UNSET,
+    municipio: str | int | float | None = _UNSET,
+) -> tuple[str | None, str | None]:
+    """Atualiza os filtros geográficos globais.
+
+    Use isto no notebook em vez de reatribuir FILTRO_UF/FILTRO_MUNICIPIO:
+    `from config import FILTRO_UF` cria uma cópia do nome, e reatribuí-la não
+    altera o estado lido pelas funções de filtro.
+    """
+    global FILTRO_UF, FILTRO_MUNICIPIO
+    if uf is not _UNSET:
+        FILTRO_UF = normalize_uf_filtro(uf)
+    if municipio is not _UNSET:
+        FILTRO_MUNICIPIO = normalize_municipio_filtro(municipio)
+    return FILTRO_UF, FILTRO_MUNICIPIO
+
+
 DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 
 REGISTRO_UNIFICADO = OUTPUT_DIR / "registro_unificado.parquet"
-GROUND_TRUTH_CLUSTERS = OUTPUT_DIR / "ground_truth_clusters.parquet"
-SPLINK_SETTINGS_DRAFT = OUTPUT_DIR / "splink_settings_draft.json"
+
+# Artefatos do treino (NB02), consumidos pela validação (NB03)
+SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
+SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
+SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
+METRICAS_COHORT = OUTPUT_DIR / "metricas_cohort.csv"
 
 CPF_NORM_SQL = "lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 11, '0')"
 
@@ -214,20 +243,22 @@ def materialize_censo_cep_lookup(
     *,
     source_path: Path | None = None,
     target_table: str = "censo_cep_lookup",
-    filtro_uf: str | int | float | None = FILTRO_UF,
-    filtro_municipio: str | int | float | None = FILTRO_MUNICIPIO,
+    filtro_uf: str | int | float | None = _UNSET,
+    filtro_municipio: str | int | float | None = _UNSET,
 ) -> None:
     """Materializa lookup de CEP a partir de data_cep_uniq.csv (filtro UF e/ou município)."""
     path = (source_path or CENSO_CEP_ARQUIVO).expanduser()
     clauses: list[str] = []
-    uf = normalize_uf_filtro(filtro_uf)
+    uf = normalize_uf_filtro(FILTRO_UF if filtro_uf is _UNSET else filtro_uf)
     if uf:
         safe = uf.replace("'", "''")
         uf_col = f'c."{CEP_COL_UF}"'
         clauses.append(
             f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0') = '{safe}'"
         )
-    mun = normalize_municipio_filtro(filtro_municipio)
+    mun = normalize_municipio_filtro(
+        FILTRO_MUNICIPIO if filtro_municipio is _UNSET else filtro_municipio
+    )
     if mun:
         safe_mun = mun.replace("'", "''")
         mun_col = f'c."{CEP_COL_MUNICIPIO}"'
@@ -290,9 +321,9 @@ def sql_optional_col(alias: str, col: str | None, *, cast_varchar: bool = True) 
 
 def uf_filter_clause(
     uf_expr: str,
-    filtro: str | int | float | None = FILTRO_UF,
+    filtro: str | int | float | None = _UNSET,
 ) -> str:
-    uf = normalize_uf_filtro(filtro)
+    uf = normalize_uf_filtro(FILTRO_UF if filtro is _UNSET else filtro)
     if not uf:
         return "TRUE"
     safe = uf.replace("'", "''")
@@ -301,9 +332,9 @@ def uf_filter_clause(
 
 def municipio_filter_clause(
     mun_expr: str,
-    filtro: str | int | float | None = FILTRO_MUNICIPIO,
+    filtro: str | int | float | None = _UNSET,
 ) -> str:
-    mun = normalize_municipio_filtro(filtro)
+    mun = normalize_municipio_filtro(FILTRO_MUNICIPIO if filtro is _UNSET else filtro)
     if not mun:
         return "TRUE"
     safe = mun.replace("'", "''")
@@ -314,8 +345,8 @@ def geo_filter_clause(
     uf_expr: str,
     mun_expr: str,
     *,
-    filtro_uf: str | int | float | None = FILTRO_UF,
-    filtro_municipio: str | int | float | None = FILTRO_MUNICIPIO,
+    filtro_uf: str | int | float | None = _UNSET,
+    filtro_municipio: str | int | float | None = _UNSET,
 ) -> str:
     """Combina filtros UF e município (AND). Município IBGE 7 díg. já inclui UF."""
     parts = [
@@ -355,12 +386,10 @@ SPLINK_INPUT_VIEW = "splink_input"
 
 
 def materialize_splink_input(con: duckdb.DuckDBPyConnection) -> None:
-    """View Splink: registro_unificado + coluna cluster (labels GT)."""
+    """View de entrada do Splink. Sem labels: a coorte só entra no NB03."""
     con.execute(f"""
     CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
-    SELECT r.*, g.cluster
-    FROM registro_unificado r
-    LEFT JOIN ground_truth_clusters g ON r.unique_id = g.unique_id
+    SELECT * FROM registro_unificado
     """)
 
 
@@ -426,7 +455,6 @@ def require_tables(
 ) -> None:
     parquet_map = parquet_map or {
         "registro_unificado": REGISTRO_UNIFICADO,
-        "ground_truth_clusters": GROUND_TRUTH_CLUSTERS,
     }
     missing: list[str] = []
     for table in tables:
