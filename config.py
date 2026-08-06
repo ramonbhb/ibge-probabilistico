@@ -24,12 +24,24 @@ def normalize_uf_filtro(filtro: str | int | float | None) -> str | None:
     return s or None
 
 
+def normalize_municipio_filtro(filtro: str | int | float | None) -> str | None:
+    """Normaliza FILTRO_MUNICIPIO para código IBGE 7 dígitos."""
+    if filtro is None:
+        return None
+    if isinstance(filtro, bool):
+        return None
+    digits = "".join(ch for ch in str(filtro).strip() if ch.isdigit())
+    if not digits:
+        return None
+    return digits.zfill(7)[-7:]
+
+
 # =============================================================================
 # AJUSTE AQUI — caminhos, filtro UF e mapeamento de colunas bronze
 # =============================================================================
 #
 # Variáveis de ambiente: OUTPUT_DIR, CPF_ARQUIVO, CENSO_PESSOAS_ARQUIVO,
-# CENSO_CEP_ARQUIVO, COHORT_DEDUP_ARQUIVO, FILTRO_UF
+# CENSO_CEP_ARQUIVO, COHORT_DEDUP_ARQUIVO, FILTRO_UF, FILTRO_MUNICIPIO
 
 PROB_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(
@@ -80,6 +92,13 @@ if _env_uf:
     FILTRO_UF = _env_uf
 FILTRO_UF = normalize_uf_filtro(FILTRO_UF)
 
+# None = sem filtro. Prioridade: env FILTRO_MUNICIPIO > valor abaixo.
+FILTRO_MUNICIPIO: str | int | None = None  # ex.: 4205407 (Florianópolis)
+_env_mun = os.environ.get("FILTRO_MUNICIPIO", "").strip()
+if _env_mun:
+    FILTRO_MUNICIPIO = _env_mun
+FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
+
 DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 
 REGISTRO_UNIFICADO = OUTPUT_DIR / "registro_unificado.parquet"
@@ -106,6 +125,8 @@ CENSO_COL_DOB_MES = "PECP0036"
 CENSO_COL_DOB_DIA = "PECP0006"
 CENSO_COL_SEXO = "PECP0002"
 CENSO_COL_RELACAO = "PECP0004"
+CENSO_COL_IDADE_ANOS = "PECP0003"
+CENSO_COL_IDADE_MESES = "PECP0030"
 CENSO_COL_UF = "B0001"
 # Chaves de join pessoas ↔ data_cep_uniq.csv
 CENSO_COL_SETOR = "B0000"
@@ -129,6 +150,8 @@ USE_PHONETIC_STRIP_VOWELS = os.environ.get(
 
 DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "20"))
 DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "300GB")
+
+ANO_REFERENCIA_CENSO = 2022
 
 
 def cpf_norm_sql(col: str) -> str:
@@ -161,6 +184,24 @@ def censo_uf_expr(alias: str = "p") -> str:
     return censo_uf_sql(alias)
 
 
+def cpf_municipio_sql(col: str) -> str:
+    """Código IBGE município (7 díg.) a partir de COD_UFMUN."""
+    return f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0')"
+
+
+def censo_municipio_sql(alias: str = "p") -> str:
+    """Código IBGE município (7 díg.) a partir do setor censitário B0000."""
+    return f"substr({setor_norm_sql(f'{alias}.{CENSO_COL_SETOR}')}, 1, 7)"
+
+
+def cpf_municipio_expr(alias: str = "c") -> str:
+    return cpf_municipio_sql(f'{alias}."{CPF_COL_UF}"')
+
+
+def censo_municipio_expr(alias: str = "p") -> str:
+    return censo_municipio_sql(alias)
+
+
 def censo_cep_join_on(p_alias: str = "p", cep_alias: str = "k") -> str:
     """Condição ON para join censo_pessoas ↔ lookup de CEP."""
     return f"""{setor_norm_sql(f'{p_alias}.{CENSO_COL_SETOR}')} = {cep_alias}.cod_setor_norm
@@ -174,17 +215,26 @@ def materialize_censo_cep_lookup(
     source_path: Path | None = None,
     target_table: str = "censo_cep_lookup",
     filtro_uf: str | int | float | None = FILTRO_UF,
+    filtro_municipio: str | int | float | None = FILTRO_MUNICIPIO,
 ) -> None:
-    """Materializa lookup de CEP a partir de data_cep_uniq.csv (opcionalmente filtrado por UF)."""
+    """Materializa lookup de CEP a partir de data_cep_uniq.csv (filtro UF e/ou município)."""
     path = (source_path or CENSO_CEP_ARQUIVO).expanduser()
-    uf_clause = "TRUE"
+    clauses: list[str] = []
     uf = normalize_uf_filtro(filtro_uf)
     if uf:
         safe = uf.replace("'", "''")
         uf_col = f'c."{CEP_COL_UF}"'
-        uf_clause = (
+        clauses.append(
             f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0') = '{safe}'"
         )
+    mun = normalize_municipio_filtro(filtro_municipio)
+    if mun:
+        safe_mun = mun.replace("'", "''")
+        mun_col = f'c."{CEP_COL_MUNICIPIO}"'
+        clauses.append(
+            f"lpad(regexp_replace(CAST({mun_col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0') = '{safe_mun}'"
+        )
+    where_clause = " AND ".join(clauses) if clauses else "TRUE"
 
     con.execute(f"""
     CREATE OR REPLACE TABLE {target_table} AS
@@ -194,7 +244,7 @@ def materialize_censo_cep_lookup(
         CAST(c."{CEP_COL_FACE}" AS VARCHAR) AS num_face,
         {cep_norm_sql(f'MIN(c."{CEP_COL_CEP}")')} AS cep
     FROM read_csv('{path}', header=true, auto_detect=true) c
-    WHERE {uf_clause}
+    WHERE {where_clause}
     GROUP BY 1, 2, 3
     """)
 
@@ -207,6 +257,28 @@ def censo_dob_sql(
     return f"""COALESCE(CAST({ano} AS VARCHAR), '') || '-' ||
         LPAD(COALESCE(CAST({mes} AS VARCHAR), ''), 2, '0') || '-' ||
         LPAD(COALESCE(CAST({dia} AS VARCHAR), ''), 2, '0')"""
+
+
+def idade_censo_sql(alias: str = "p") -> str:
+    """Idade em anos: PECP0003; fallback PECP0030 (meses) convertido para anos."""
+    anos = f'TRY_CAST({alias}."{CENSO_COL_IDADE_ANOS}" AS INTEGER)'
+    meses = f'TRY_CAST({alias}."{CENSO_COL_IDADE_MESES}" AS INTEGER)'
+    return f"""CASE
+        WHEN {anos} BETWEEN 0 AND 120 THEN {anos}
+        WHEN {meses} BETWEEN 0 AND 1440 THEN CAST(FLOOR({meses} / 12.0) AS INTEGER)
+        ELSE NULL
+    END"""
+
+
+def idade_cpf_sql(dob_expr: str, ano: int = ANO_REFERENCIA_CENSO) -> str:
+    """Idade em anos na referência do Censo (usa só o ano da data de nascimento)."""
+    ano_nasc = f"TRY_CAST(substr(CAST({dob_expr} AS VARCHAR), 1, 4) AS INTEGER)"
+    return f"""CASE
+        WHEN {dob_expr} IS NULL OR TRIM(CAST({dob_expr} AS VARCHAR)) = '' THEN NULL
+        WHEN {ano_nasc} BETWEEN 1900 AND {ano}
+        THEN {ano} - {ano_nasc}
+        ELSE NULL
+    END"""
 
 
 def sql_optional_col(alias: str, col: str | None, *, cast_varchar: bool = True) -> str:
@@ -225,6 +297,35 @@ def uf_filter_clause(
         return "TRUE"
     safe = uf.replace("'", "''")
     return f"{uf_expr} = '{safe}'"
+
+
+def municipio_filter_clause(
+    mun_expr: str,
+    filtro: str | int | float | None = FILTRO_MUNICIPIO,
+) -> str:
+    mun = normalize_municipio_filtro(filtro)
+    if not mun:
+        return "TRUE"
+    safe = mun.replace("'", "''")
+    return f"{mun_expr} = '{safe}'"
+
+
+def geo_filter_clause(
+    uf_expr: str,
+    mun_expr: str,
+    *,
+    filtro_uf: str | int | float | None = FILTRO_UF,
+    filtro_municipio: str | int | float | None = FILTRO_MUNICIPIO,
+) -> str:
+    """Combina filtros UF e município (AND). Município IBGE 7 díg. já inclui UF."""
+    parts = [
+        uf_filter_clause(uf_expr, filtro_uf),
+        municipio_filter_clause(mun_expr, filtro_municipio),
+    ]
+    active = [p for p in parts if p != "TRUE"]
+    if not active:
+        return "TRUE"
+    return " AND ".join(f"({p})" for p in active)
 
 
 def cep_norm_sql(col: str) -> str:
@@ -356,5 +457,6 @@ def print_paths() -> None:
     print("CENSO_CEP_ARQUIVO:", CENSO_CEP_ARQUIVO)
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)
     print("FILTRO_UF:", FILTRO_UF)
+    print("FILTRO_MUNICIPIO:", FILTRO_MUNICIPIO)
     print("USE_PHONETIC_STRIP_VOWELS:", USE_PHONETIC_STRIP_VOWELS)
     print("DUCKDB_ARQUIVO:", DUCKDB_ARQUIVO)
