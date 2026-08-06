@@ -11,19 +11,19 @@ Treino e validação são separados: o modelo é treinado sem ver a coorte (NB02
 
 ## Configuração
 
-Edite [`config.py`](config.py) ou exporte:
+### Parâmetros de análise — só em [`config.py`](config.py)
 
-```bash
-export FILTRO_UF=35
-export FILTRO_MUNICIPIO=3550308   # ex.: São Paulo (IBGE 7 díg.); None = sem filtro
-export OUTPUT_DIR=~/data/probabilistico_output
-export USE_PHONETIC_STRIP_VOWELS=false   # true = colunas *_phon_sv (remove vogais)
-export DUCKDB_THREADS=20                  # Splink/DuckDB (default em config.py)
-export DUCKDB_MEMORY_LIMIT=300GB          # Splink/DuckDB (default em config.py)
-# CENSO_CEP_ARQUIVO default: ~/singed/bases/raw/Censo/data_cep_uniq.csv
+Recorte geográfico e fonética mudam a cada rodada e ficam versionados, no bloco `PARÂMETROS DE ANÁLISE` no topo do arquivo:
+
+```python
+FILTRO_UF: str | int | None = None            # ex.: 42 (SC); None = nacional
+FILTRO_MUNICIPIO: str | int | None = 2111300  # IBGE 7 díg.; None = sem filtro
+USE_PHONETIC_STRIP_VOWELS = False             # True = colunas *_phon_sv (remove vogais)
 ```
 
-Para sobrescrever o filtro geográfico dentro de um notebook, use `config.set_filtros()` — nunca reatribua `FILTRO_UF` / `FILTRO_MUNICIPIO`:
+Não existem `export FILTRO_UF` / `export FILTRO_MUNICIPIO`: filtro é parâmetro de análise, não configuração de ambiente.
+
+Para sobrescrever o filtro só na sessão atual de um notebook, use `config.set_filtros()` — nunca reatribua `FILTRO_UF` / `FILTRO_MUNICIPIO`:
 
 ```python
 import config
@@ -32,6 +32,18 @@ print(config.FILTRO_UF, config.FILTRO_MUNICIPIO)
 ```
 
 `from config import FILTRO_UF` copia o valor no momento do import; reatribuir essa cópia deixa o notebook exibindo o filtro novo enquanto as funções de filtro continuam usando o antigo.
+
+### Caminhos e recursos — variam por máquina
+
+Têm default em `config.py` e aceitam variável de ambiente:
+
+```bash
+export OUTPUT_DIR=~/data/probabilistico_output
+export DUCKDB_THREADS=20           # Splink/DuckDB
+export DUCKDB_MEMORY_LIMIT=300GB   # Splink/DuckDB
+```
+
+Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_ARQUIVO` (default `~/singed/bases/raw/censo/data_cep_uniq.csv`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `DUCKDB_TEMP_DIR`.
 
 ## Notebooks
 

@@ -42,11 +42,46 @@ def normalize_municipio_filtro(filtro: str | int | float | None) -> str | None:
 
 
 # =============================================================================
-# AJUSTE AQUI — caminhos, filtro UF e mapeamento de colunas bronze
+# PARÂMETROS DE ANÁLISE — ajuste aqui a cada rodada
+# =============================================================================
+
+# Recorte geográfico. None = sem filtro (base nacional).
+FILTRO_UF: str | int | None = None            # ex.: 42 (SC)
+FILTRO_MUNICIPIO: str | int | None = 2111300  # ex.: 4205407 (Florianópolis)
+
+FILTRO_UF = normalize_uf_filtro(FILTRO_UF)
+FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
+
+# True = gera também as colunas *_phon_sv (fonética agressiva, remove vogais).
+USE_PHONETIC_STRIP_VOWELS = False
+
+
+def set_filtros(
+    *,
+    uf: str | int | float | None = _UNSET,
+    municipio: str | int | float | None = _UNSET,
+) -> tuple[str | None, str | None]:
+    """Sobrescreve os filtros geográficos para a sessão atual.
+
+    Use isto no notebook em vez de reatribuir FILTRO_UF/FILTRO_MUNICIPIO:
+    `from config import FILTRO_UF` cria uma cópia do nome, e reatribuí-la não
+    altera o estado lido pelas funções de filtro.
+    """
+    global FILTRO_UF, FILTRO_MUNICIPIO
+    if uf is not _UNSET:
+        FILTRO_UF = normalize_uf_filtro(uf)
+    if municipio is not _UNSET:
+        FILTRO_MUNICIPIO = normalize_municipio_filtro(municipio)
+    return FILTRO_UF, FILTRO_MUNICIPIO
+
+
+# =============================================================================
+# CAMINHOS E RECURSOS — variam por máquina, aceitam variável de ambiente
 # =============================================================================
 #
-# Variáveis de ambiente: OUTPUT_DIR, CPF_ARQUIVO, CENSO_PESSOAS_ARQUIVO,
-# CENSO_CEP_ARQUIVO, COHORT_DEDUP_ARQUIVO, FILTRO_UF, FILTRO_MUNICIPIO
+# OUTPUT_DIR, CENSO_DIR, CENSO_RAW_DIR, CENSO_CEP_ARQUIVO,
+# CENSO_PESSOAS_ARQUIVO, CPF_ARQUIVO, COHORT_DIR, COHORT_DEDUP_ARQUIVO,
+# DUCKDB_TEMP_DIR, DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
 
 PROB_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(
@@ -89,40 +124,6 @@ COHORT_DIR = Path(
 COHORT_DEDUP_ARQUIVO = Path(
     os.environ.get("COHORT_DEDUP_ARQUIVO", COHORT_DIR / "cohort_dedup.parquet")
 ).expanduser()
-
-# None = nacional. Prioridade: env FILTRO_UF > valor abaixo.
-FILTRO_UF: str | int | None = None  # ex.: 42 (SC)
-_env_uf = os.environ.get("FILTRO_UF", "").strip()
-if _env_uf:
-    FILTRO_UF = _env_uf
-FILTRO_UF = normalize_uf_filtro(FILTRO_UF)
-
-# None = sem filtro. Prioridade: env FILTRO_MUNICIPIO > valor abaixo.
-FILTRO_MUNICIPIO: str | int | None = None  # ex.: 4205407 (Florianópolis)
-_env_mun = os.environ.get("FILTRO_MUNICIPIO", "").strip()
-if _env_mun:
-    FILTRO_MUNICIPIO = _env_mun
-FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
-
-
-def set_filtros(
-    *,
-    uf: str | int | float | None = _UNSET,
-    municipio: str | int | float | None = _UNSET,
-) -> tuple[str | None, str | None]:
-    """Atualiza os filtros geográficos globais.
-
-    Use isto no notebook em vez de reatribuir FILTRO_UF/FILTRO_MUNICIPIO:
-    `from config import FILTRO_UF` cria uma cópia do nome, e reatribuí-la não
-    altera o estado lido pelas funções de filtro.
-    """
-    global FILTRO_UF, FILTRO_MUNICIPIO
-    if uf is not _UNSET:
-        FILTRO_UF = normalize_uf_filtro(uf)
-    if municipio is not _UNSET:
-        FILTRO_MUNICIPIO = normalize_municipio_filtro(municipio)
-    return FILTRO_UF, FILTRO_MUNICIPIO
-
 
 DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 
@@ -172,10 +173,6 @@ CEP_COL_QUADRA = "NUM_QUADRA"
 CEP_COL_FACE = "NUM_FACE"
 CEP_COL_CEP = "CEP"
 CEP_COL_LOG = "NO_LOG"
-
-USE_PHONETIC_STRIP_VOWELS = os.environ.get(
-    "USE_PHONETIC_STRIP_VOWELS", "false"
-).lower() in ("1", "true", "yes")
 
 DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "20"))
 DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "300GB")
