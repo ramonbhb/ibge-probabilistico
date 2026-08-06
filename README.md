@@ -77,9 +77,18 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 - **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
 - Sexo, DOB, **idade** (anos na referência do Censo 2022), CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
-- **`idade`:** Censo `PECP0003` (anos), fallback `PECP0030` (meses → `FLOOR/12`); CPF `ANO_REFERENCIA_CENSO - ano(data_nascimento)` ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py))
+- **`idade`:** anos completos na referência do Censo ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo
 - Fonética **básica** sempre: `*_phon` (substituições PT-BR)
 - Fonética **agressiva** opcional: `*_phon_sv` (`USE_PHONETIC_STRIP_VOWELS=True`)
+
+### Idade
+
+No Censo as duas colunas **dividem a população**, não uma cobre a outra: `PECP0003` (3 díg.) é preenchida só para quem tem **1 ano ou mais**, `PECP0030` (2 díg.) só para **menores de 1 ano**. Quem tem meses preenchidos tem 0 ano completo — não se divide por 12. No CPF a idade é derivada de `data_nascimento`, então tudo que impede a data de parsear zera a idade junto.
+
+Se a idade vier muito nula, a célula **3b do NB00** aponta a causa: tipos das colunas, contagem de nulos de cada lado e os valores crus mais frequentes. Dois casos conhecidos que zeram a idade do CPF inteiro:
+
+- `DAT_NASCIMENTO` como **inteiro de 8 dígitos** (`19900102`) ou string compacta. O `normalize_date_sql` do `ibge_common` só reconhece data com separador. Por isso existe [`normalize_date_compacta_sql`](features.py), extensão local que aceita `YYYYMMDD` sem tocar na função compartilhada. É estritamente aditiva: só age onde a original falhava, exige 8 dígitos e valida via `strptime`, então `99999999` e `19900230` seguem rejeitados. O diagnóstico mostra `recuperado_compacto`, que é quanto esse formato estava custando.
+- Data fora de `[ANO_NASCIMENTO_MIN, ANO_REFERENCIA_CENSO]`, que o NB00b anula junto com a idade.
 
 ### Featurização de nomes: SQL, não Python
 
@@ -98,7 +107,7 @@ Duas traduções não são literais, porque o RE2 do DuckDB não tem lookahead n
 
 Duas classes de problema, um passe só sobre `registro_unificado`.
 
-**Linha que não pode casar.** Quem morreu antes do Censo 2022 não foi enumerado, então nenhum par Censo × CPF com esse registro é verdadeiro. O corte é `ANO_OBITO_CORTE` sobre `ano_obito`, que vem de `CPF_COL_ANO_OBITO` no bronze. A coluna é opcional: o NB00 detecta a ausência, avisa e preenche `NULL`, e o NB00b então não remove nada. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam — o corte só tem limite inferior, para nunca descartar por ruído de digitação.
+**Linha que não pode casar.** Quem morreu antes do Censo 2022 não foi enumerado, então nenhum par Censo × CPF com esse registro é verdadeiro. O corte é `ANO_OBITO_CORTE` sobre `ano_obito`, que vem de `CPF_COL_ANO_OBITO` no bronze. O NB00 falha se a coluna não estiver no bronze, em vez de preencher `NULL` e desligar o filtro em silêncio. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam — o corte só tem limite inferior, para nunca descartar por ruído de digitação.
 
 **Valor-sentinela que o SQL lê como igualdade.** É o problema mais caro dos dois. `l.cep = r.cep` trata `'' = ''` e `'00000000' = '00000000'` como acordo real, então ausência vira par candidato; nas `deterministic_rules` do NB02 vira até match determinístico, contaminando a estimativa do prior. As três colunas afetadas nascem assim: `normalize_date_sql` devolve `''` quando a data não parseia, `cep_norm_sql` faz `lpad(..., 8, '0')` e transforma CEP ausente do CPF em `'00000000'` (o Censo usa `''` para o mesmo caso), e nome que não normaliza vira `''` — inclusive `primeiro_nome` e `ultimo_nome`, que estão na blocking rule principal. Todos viram `NULL`, que não casa com `NULL`.
 

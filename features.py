@@ -137,6 +137,27 @@ def split_name_three_parts(name) -> tuple[str, str, str]:
     return toks[0], " ".join(toks[1:-1]), toks[-1]
 
 
+def normalize_date_compacta_sql(col: str) -> str:
+    """normalize_date_sql mais o formato compacto YYYYMMDD.
+
+    Extensão local, para não mexer no ibge_common que os outros pipelines usam.
+    O `normalize_date_sql` só reconhece data com separador, então uma coluna
+    inteira de 8 dígitos (19900102) — encoding comum em extrato de base
+    administrativa — devolve '' e leva a idade junto.
+
+    Estritamente aditivo: só age onde a expressão original já falhava, exige 8
+    dígitos e valida via strptime, então 99999999 e 19900230 seguem rejeitados.
+    """
+    base = normalize_date_sql(col)
+    digitos = f"regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g')"
+    compacta = (
+        f"CASE WHEN length({digitos}) = 8 THEN "
+        f"coalesce(strftime(try_strptime({digitos}, '%Y%m%d'), '%Y-%m-%d'), '') "
+        f"ELSE '' END"
+    )
+    return f"coalesce(NULLIF({base}, ''), {compacta})"
+
+
 def normalize_sexo(sexo) -> str:
     s = normalize_text(sexo)
     if s in {"M", "MASC", "MASCULINO", "1"}:

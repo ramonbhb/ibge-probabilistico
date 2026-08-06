@@ -19,7 +19,7 @@ from config import (  # noqa: E402
     idade_cpf_sql,
     idade_int_sql,
 )
-from features import normalize_date_sql  # noqa: E402
+from features import normalize_date_compacta_sql, normalize_date_sql  # noqa: E402
 
 
 @pytest.fixture()
@@ -119,19 +119,51 @@ def test_idade_cpf(con, data, esperado) -> None:
 
 
 @pytest.mark.parametrize(
-    "bruto,parseou",
+    "bruto,esperado",
     [
-        ("1990-01-02", True),
-        ("02/01/1990", True),
-        ("02-01-1990", True),
-        ("19900102", False),   # formato compacto não é tratado hoje
-        ("01/1990", False),
+        ("1990-01-02", "1990-01-02"),
+        ("02/01/1990", "1990-01-02"),
+        ("02-01-1990", "1990-01-02"),
+        ("1990/01/02", "1990-01-02"),
+        ("1990-01-02 00:00:00", "1990-01-02"),
+        ("19900102", "1990-01-02"),   # compacto, só a extensão local pega
+        ("", ""),
+        ("01/1990", ""),
+        ("99999999", ""),
+        ("19901301", ""),             # mês 13
+        ("19900230", ""),             # 30 de fevereiro
+        ("123456789", ""),            # 9 dígitos não é data compacta
     ],
 )
-def test_formatos_de_data_aceitos(con, bruto, parseou) -> None:
-    """Se DAT_NASCIMENTO vier num formato fora desta lista, a idade do CPF zera."""
+def test_formatos_de_data_aceitos(con, bruto, esperado) -> None:
+    """Formato fora desta lista zera a idade do CPF, que é derivada da data."""
     saida = con.execute(
-        f"SELECT {normalize_date_sql('v')} FROM (SELECT CAST(? AS VARCHAR) AS v) t",
+        f"SELECT {normalize_date_compacta_sql('v')} "
+        "FROM (SELECT CAST(? AS VARCHAR) AS v) t",
         [bruto],
     ).fetchone()[0]
-    assert (saida != "") is parseou, f"{bruto!r} → {saida!r}"
+    assert saida == esperado, f"{bruto!r} → {saida!r}"
+
+
+@pytest.mark.parametrize(
+    "literal", ["19900102", "CAST(19900102 AS BIGINT)", "DATE '1990-01-02'"]
+)
+def test_data_compacta_recupera_coluna_numerica(con, literal) -> None:
+    """Coluna inteira de 8 dígitos é a hipótese principal para a idade nula."""
+    saida = con.execute(
+        f"SELECT {normalize_date_compacta_sql('v')} FROM (SELECT {literal} AS v) t"
+    ).fetchone()[0]
+    assert saida == "1990-01-02"
+
+
+def test_extensao_compacta_e_aditiva(con) -> None:
+    """Nada que já parseava pode mudar de resultado."""
+    casos = ["1990-01-02", "02/01/1990", "1990/01/02", "1990-1-2", "", "abc", "NULL"]
+    for bruto in casos:
+        antes, depois = con.execute(
+            f"SELECT {normalize_date_sql('v')}, {normalize_date_compacta_sql('v')} "
+            "FROM (SELECT CAST(? AS VARCHAR) AS v) t",
+            [bruto],
+        ).fetchone()
+        if antes != "":
+            assert depois == antes, f"{bruto!r}: {antes!r} virou {depois!r}"
