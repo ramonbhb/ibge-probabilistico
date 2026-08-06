@@ -250,6 +250,26 @@ def get_connection(
     return con
 
 
+SPLINK_INPUT_VIEW = "splink_input"
+
+
+def materialize_splink_input(con: duckdb.DuckDBPyConnection) -> None:
+    """View Splink: registro_unificado + coluna cluster (labels GT)."""
+    con.execute(f"""
+    CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
+    SELECT r.*, g.cluster
+    FROM registro_unificado r
+    LEFT JOIN ground_truth_clusters g ON r.unique_id = g.unique_id
+    """)
+
+
+def get_splink_db_api(con: duckdb.DuckDBPyConnection):
+    """DuckDBAPI Splink reutilizando conexão configurada (threads, memory_limit)."""
+    from splink import DuckDBAPI
+
+    return DuckDBAPI(connection=con)
+
+
 def benchmark_checkpoint(con: duckdb.DuckDBPyConnection, name: str, sql: str) -> None:
     result = con.execute(sql).fetchone()
     print(f"[checkpoint] {name}: {result[0]}")

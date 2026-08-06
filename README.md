@@ -15,6 +15,8 @@ Edite [`config.py`](config.py) ou exporte:
 export FILTRO_UF=35
 export OUTPUT_DIR=~/data/probabilistico_output
 export USE_PHONETIC_STRIP_VOWELS=false   # true = colunas *_phon_sv (remove vogais)
+export DUCKDB_THREADS=20                  # Splink/DuckDB (default em config.py)
+export DUCKDB_MEMORY_LIMIT=300GB          # Splink/DuckDB (default em config.py)
 # CENSO_CEP_ARQUIVO default: ~/singed/bases/raw/Censo/data_cep_uniq.csv
 ```
 
@@ -26,7 +28,7 @@ export USE_PHONETIC_STRIP_VOWELS=false   # true = colunas *_phon_sv (remove voga
 | [`00_preparar_bases_leve.ipynb`](notebooks/00_preparar_bases_leve.ipynb) | Igual ao NB00, split SQL rápido (sem fonética) — ideal para iterar Splink |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, CEP, UF |
 | [`01_explorar_variaveis.ipynb`](notebooks/01_explorar_variaveis.ipynb) | Splink: profile, blocking, draft settings |
-| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Splink + métricas vs coorte |
+| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Splink dedupe + gráficos (match weights, accuracy, waterfalls, cluster studio) + recall coorte |
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer.
 
@@ -43,7 +45,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 
 ## Saídas
 
-`~/data/probabilistico_output/`: `probabilistico.duckdb`, `registro_unificado.parquet`, `ground_truth_clusters.parquet`, artefatos Splink.
+`~/data/probabilistico_output/`: `probabilistico.duckdb`, `registro_unificado.parquet`, `ground_truth_clusters.parquet`, `splink_predictions.parquet`, `splink_clusters.parquet`, `dashboards/cluster_studio.html`, `metricas_cohort.csv`.
 
 ## Ground truth
 
