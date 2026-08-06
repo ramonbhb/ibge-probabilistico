@@ -1,7 +1,7 @@
 -- Snippets de referência para o NB00 (copiar/adaptar).
 
 -- UF CPF: substr(COD_UFMUN, 1, 2) via cpf_uf_expr('c')
--- UF Censo: B0001 via censo_uf_expr('p')
+-- UF Censo: substr(B0000, 1, 2) via censo_uf_expr('p')
 -- CEP Censo: materialize_censo_cep_lookup(con) + LEFT JOIN censo_morador_cep
 --   ON B0000=COD_SETOR, NUM_QUADRA, NUM_FACE (data_cep_uniq.csv)
 

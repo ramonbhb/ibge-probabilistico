@@ -9,6 +9,21 @@ import duckdb
 
 from features import normalize_date_sql
 
+
+def normalize_uf_filtro(filtro: str | int | float | None) -> str | None:
+    """Normaliza FILTRO_UF para string SQL (aceita int/float do notebook)."""
+    if filtro is None:
+        return None
+    if isinstance(filtro, bool):
+        return None
+    if isinstance(filtro, int):
+        return f"{filtro:02d}"
+    if isinstance(filtro, float) and filtro.is_integer():
+        return f"{int(filtro):02d}"
+    s = str(filtro).strip()
+    return s or None
+
+
 # =============================================================================
 # AJUSTE AQUI — caminhos, filtro UF e mapeamento de colunas bronze
 # =============================================================================
@@ -26,7 +41,7 @@ CENSO_DIR = Path(
 ).expanduser()
 
 CENSO_RAW_DIR = Path(
-    os.environ.get("CENSO_RAW_DIR", Path.home() / "singed/bases/raw/Censo")
+    os.environ.get("CENSO_RAW_DIR", Path.home() / "singed/bases/raw/censo")
 ).expanduser()
 
 CENSO_CEP_ARQUIVO = Path(
@@ -58,9 +73,12 @@ COHORT_DEDUP_ARQUIVO = Path(
     os.environ.get("COHORT_DEDUP_ARQUIVO", COHORT_DIR / "cohort_dedup.parquet")
 ).expanduser()
 
-# None = nacional; ex.: '35' (SP), '33' (RJ)
+# None = nacional. Prioridade: env FILTRO_UF > valor abaixo.
+FILTRO_UF: str | int | None = None  # ex.: 42 (SC)
 _env_uf = os.environ.get("FILTRO_UF", "").strip()
-FILTRO_UF: str | None = _env_uf or None
+if _env_uf:
+    FILTRO_UF = _env_uf
+FILTRO_UF = normalize_uf_filtro(FILTRO_UF)
 
 DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 
@@ -117,6 +135,13 @@ def cpf_norm_sql(col: str) -> str:
     return CPF_NORM_SQL.format(col=col)
 
 
+def setor_norm_sql(col: str) -> str:
+    """Normaliza código de setor censitário (15 díg.) para join."""
+    return (
+        f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 15, '0')"
+    )
+
+
 def cpf_uf_sql(col: str) -> str:
     """UF (2 dígitos IBGE) a partir de COD_UFMUN ou similar."""
     digits = f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0')"
@@ -124,9 +149,8 @@ def cpf_uf_sql(col: str) -> str:
 
 
 def censo_uf_sql(alias: str = "p") -> str:
-    """UF do morador Censo (coluna B0001 ou configurada em CENSO_COL_UF)."""
-    col = f'{alias}."{CENSO_COL_UF}"'
-    return f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0')"
+    """UF (2 díg.) a partir do setor censitário B0000."""
+    return f"substr({setor_norm_sql(f'{alias}.{CENSO_COL_SETOR}')}, 1, 2)"
 
 
 def cpf_uf_expr(alias: str = "c") -> str:
@@ -135,13 +159,6 @@ def cpf_uf_expr(alias: str = "c") -> str:
 
 def censo_uf_expr(alias: str = "p") -> str:
     return censo_uf_sql(alias)
-
-
-def setor_norm_sql(col: str) -> str:
-    """Normaliza código de setor censitário (15 díg.) para join."""
-    return (
-        f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 15, '0')"
-    )
 
 
 def censo_cep_join_on(p_alias: str = "p", cep_alias: str = "k") -> str:
@@ -156,13 +173,14 @@ def materialize_censo_cep_lookup(
     *,
     source_path: Path | None = None,
     target_table: str = "censo_cep_lookup",
-    filtro_uf: str | None = FILTRO_UF,
+    filtro_uf: str | int | float | None = FILTRO_UF,
 ) -> None:
     """Materializa lookup de CEP a partir de data_cep_uniq.csv (opcionalmente filtrado por UF)."""
     path = (source_path or CENSO_CEP_ARQUIVO).expanduser()
     uf_clause = "TRUE"
-    if filtro_uf:
-        safe = filtro_uf.replace("'", "''")
+    uf = normalize_uf_filtro(filtro_uf)
+    if uf:
+        safe = uf.replace("'", "''")
         uf_col = f'c."{CEP_COL_UF}"'
         uf_clause = (
             f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0') = '{safe}'"
@@ -198,10 +216,14 @@ def sql_optional_col(alias: str, col: str | None, *, cast_varchar: bool = True) 
     return f"CAST({expr} AS VARCHAR)" if cast_varchar else expr
 
 
-def uf_filter_clause(uf_expr: str, filtro: str | None = FILTRO_UF) -> str:
-    if not filtro:
+def uf_filter_clause(
+    uf_expr: str,
+    filtro: str | int | float | None = FILTRO_UF,
+) -> str:
+    uf = normalize_uf_filtro(filtro)
+    if not uf:
         return "TRUE"
-    safe = filtro.replace("'", "''")
+    safe = uf.replace("'", "''")
     return f"{uf_expr} = '{safe}'"
 
 

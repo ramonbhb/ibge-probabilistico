@@ -165,6 +165,36 @@ def normalize_sexo(sexo) -> str:
     return s[:1] if s else ""
 
 
+def normalize_sexo_sql(col: str) -> str:
+    """Sexo normalizado (M/F) em SQL — equivalente a normalize_sexo()."""
+    trimmed = f"upper(trim(CAST({col} AS VARCHAR)))"
+    empty = (
+        f"trim(CAST({col} AS VARCHAR)) IN ('', 'NAN', 'NONE', 'NULL')"
+    )
+    return f"""CASE
+        WHEN {col} IS NULL OR {empty} THEN ''
+        WHEN {trimmed} IN ('M', 'MASC', 'MASCULINO', '1') THEN 'M'
+        WHEN {trimmed} IN ('F', 'FEM', 'FEMININO', '2') THEN 'F'
+        ELSE substr({trimmed}, 1, 1)
+    END"""
+
+
+def register_linkage_udfs(con) -> None:
+    """Registra UDFs para normalização em SQL (ex.: norm_text para nome_mae)."""
+    import duckdb
+
+    try:
+        con.create_function("norm_text", normalize_text, ["VARCHAR"], "VARCHAR")
+    except duckdb.Error:
+        con.remove_function("norm_text")
+        con.create_function("norm_text", normalize_text, ["VARCHAR"], "VARCHAR")
+
+
+def normalize_nome_mae_sql(col: str) -> str:
+    """nome_mae normalizado via UDF norm_text (chame register_linkage_udfs antes)."""
+    return f"NULLIF(norm_text(CAST({col} AS VARCHAR)), '')"
+
+
 def normalize_cep(cep) -> str:
     if cep is None:
         return ""
