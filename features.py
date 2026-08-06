@@ -281,3 +281,65 @@ def featurize_three_part_names_batch(
 
     con.execute(f"CREATE OR REPLACE TABLE {target_table} AS SELECT * FROM _feat_three")
     con.unregister("_feat_three")
+
+
+def split_name_parts_sql(name_col: str) -> dict[str, str]:
+    """Expressões SQL DuckDB: split primeiro/meio/último (sem fonética)."""
+    nome = (
+        f"trim(upper(CAST({name_col} AS VARCHAR)))"
+    )
+    empty = f"({nome} IS NULL OR {nome} IN ('', 'NAN', 'NONE', 'NULL'))"
+    toks = f"string_split_regex({nome}, '\\s+')"
+    n = f"len({toks})"
+    return {
+        "nome_completo": f"CASE WHEN {empty} THEN '' ELSE {nome} END",
+        "primeiro_nome": (
+            f"CASE WHEN {empty} THEN '' "
+            f"WHEN {n} = 1 THEN {toks}[1] "
+            f"ELSE {toks}[1] END"
+        ),
+        "ultimo_nome": (
+            f"CASE WHEN {empty} OR {n} <= 1 THEN '' ELSE {toks}[{n}] END"
+        ),
+        "nome_meio": (
+            f"CASE WHEN {n} <= 2 THEN '' "
+            f"ELSE array_to_string(list_slice({toks}, 2, {n} - 1), ' ') END"
+        ),
+    }
+
+
+def split_names_only_batch(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    source_table: str,
+    target_table: str,
+    name_col: str,
+    where_sql: str = "",
+) -> None:
+    """Split primeiro/meio/último em SQL puro; *_phon espelham texto (stub Splink)."""
+    from config import USE_PHONETIC_STRIP_VOWELS
+
+    parts = split_name_parts_sql(name_col)
+    where_clause = f" WHERE {where_sql}" if where_sql else ""
+    phon_sv_cols = ""
+    if USE_PHONETIC_STRIP_VOWELS:
+        phon_sv_cols = f""",
+        {parts['nome_completo']} AS nome_completo_phon_sv,
+        {parts['primeiro_nome']} AS primeiro_nome_phon_sv,
+        {parts['ultimo_nome']} AS ultimo_nome_phon_sv"""
+
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {target_table} AS
+    SELECT
+        s.*,
+        {parts['nome_completo']} AS nome_completo,
+        {parts['primeiro_nome']} AS primeiro_nome,
+        {parts['nome_meio']} AS nome_meio,
+        {parts['ultimo_nome']} AS ultimo_nome,
+        {parts['nome_completo']} AS nome_completo_phon,
+        {parts['primeiro_nome']} AS primeiro_nome_phon,
+        {parts['ultimo_nome']} AS ultimo_nome_phon
+        {phon_sv_cols}
+    FROM {source_table} s
+    {where_clause}
+    """)

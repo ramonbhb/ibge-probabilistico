@@ -23,6 +23,7 @@ export USE_PHONETIC_STRIP_VOWELS=false   # true = colunas *_phon_sv (remove voga
 | Notebook | Função |
 |----------|--------|
 | [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF → inferência mãe → CEP (`data_cep_uniq`) → stack + GT |
+| [`00_preparar_bases_leve.ipynb`](notebooks/00_preparar_bases_leve.ipynb) | Igual ao NB00, split SQL rápido (sem fonética) — ideal para iterar Splink |
 | [`01_explorar_variaveis.ipynb`](notebooks/01_explorar_variaveis.ipynb) | Profile, blocking, draft settings |
 | [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Splink + métricas vs coorte |
 
