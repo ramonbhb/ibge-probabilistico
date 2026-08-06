@@ -25,17 +25,12 @@ if _IBGE_LISTAS.is_dir() and str(_IBGE_LISTAS) not in sys.path:
 
 try:
     from ibge_common.features.ouro_cpf import (  # noqa: F401
-        br_phonetic_token,
-        featurize_names_batch,
-        full_name_norm,
-        full_name_phon,
         normalize_date,
         normalize_date_sql,
         normalize_text,
         tokenize_name,
     )
 except ImportError:
-    # Fallback mínimo (sem dependência de ibge-listas instalado)
     def strip_accents(text: str) -> str:
         text = unicodedata.normalize("NFKD", text)
         return "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -95,26 +90,56 @@ except ImportError:
         name = normalize_text(name)
         return [tok for tok in name.split() if tok] if name else []
 
-    def br_phonetic_token(token: str) -> str:
-        token = normalize_text(token)
-        if not token:
-            return ""
-        if len(token) > 1:
-            token = token[0] + re.sub(r"[AEIOU]", "", token[1:])
-        return token
 
-    def full_name_norm(name) -> str:
-        return " ".join(tokenize_name(name))
+_PHONETIC_REPLACEMENTS = [
+    ("PH", "F"), ("Y", "I"), ("W", "V"), ("CK", "K"), ("SCH", "X"),
+    ("SH", "X"), ("CH", "X"), ("LH", "L"), ("NH", "N"), ("GUI", "GI"),
+    ("GUE", "GE"), ("QUI", "KI"), ("QUE", "KE"), ("SS", "S"),
+    ("XC", "S"), ("XS", "S"), ("TS", "S"), ("TZ", "S"), ("Z", "S"), ("H", ""),
+]
 
-    def full_name_phon(name) -> str:
-        return " ".join(br_phonetic_token(t) for t in tokenize_name(name) if br_phonetic_token(t))
 
-    def featurize_names_batch(*args, **kwargs):  # type: ignore[misc]
-        raise RuntimeError("Instale ibge-listas ou polars para featurize_names_batch")
+def _dedupe_consecutive(token: str) -> str:
+    return re.sub(r"(.)\1+", r"\1", token)
+
+
+def br_phonetic_basic_token(token: str) -> str:
+    """Substituições fonéticas PT-BR; sem remoção de vogais."""
+    token = normalize_text(token)
+    if not token:
+        return ""
+    for a, b in _PHONETIC_REPLACEMENTS:
+        token = token.replace(a, b)
+    token = re.sub(r"C(?=[EI])", "S", token)
+    token = re.sub(r"G(?=[EI])", "J", token)
+    token = token.replace("Q", "K").replace("C", "K")
+    return _dedupe_consecutive(token)
+
+
+def br_phonetic_token(token: str, *, strip_vowels: bool = False) -> str:
+    """Fonética básica; strip_vowels=True aplica remoção agressiva de vogais."""
+    token = br_phonetic_basic_token(token)
+    if strip_vowels and len(token) > 1:
+        token = token[0] + re.sub(r"[AEIOU]", "", token[1:])
+        token = _dedupe_consecutive(token)
+    return token
+
+
+def full_name_norm(name) -> str:
+    return " ".join(tokenize_name(name))
+
+
+def full_name_phon_basic(name) -> str:
+    vals = [br_phonetic_basic_token(t) for t in tokenize_name(name)]
+    return " ".join(v for v in vals if v)
+
+
+def full_name_phon_sv(name) -> str:
+    vals = [br_phonetic_token(t, strip_vowels=True) for t in tokenize_name(name)]
+    return " ".join(v for v in vals if v)
 
 
 def split_name_three_parts(name) -> tuple[str, str, str]:
-    """Divide nome em primeiro, meio e último token (após normalização)."""
     toks = tokenize_name(name)
     if not toks:
         return "", "", ""
@@ -123,21 +148,12 @@ def split_name_three_parts(name) -> tuple[str, str, str]:
     return toks[0], " ".join(toks[1:-1]), toks[-1]
 
 
-def middle_name_norm(name) -> str:
-    return split_name_three_parts(name)[1]
+def _token_phon_basic(token: str) -> str:
+    return br_phonetic_basic_token(token) if token else ""
 
 
-def last_name_norm(name) -> str:
-    return split_name_three_parts(name)[2]
-
-
-def first_name_phon(name) -> str:
-    toks = tokenize_name(name)
-    return br_phonetic_token(toks[0]) if toks else ""
-
-
-def last_name_phon(name) -> str:
-    return br_phonetic_token(split_name_three_parts(name)[2])
+def _token_phon_sv(token: str) -> str:
+    return br_phonetic_token(token, strip_vowels=True) if token else ""
 
 
 def normalize_sexo(sexo) -> str:
@@ -158,22 +174,27 @@ def normalize_cep(cep) -> str:
     return digits.zfill(8)[:8]
 
 
-def _featurize_three_part_list(names: list) -> dict[str, list]:
+def _featurize_three_part_list(names: list, *, strip_vowels: bool = False) -> dict[str, list]:
     primeiro, meio, ultimo = zip(*(split_name_three_parts(n) for n in names)) if names else ([], [], [])
-    return {
+    out: dict[str, list] = {
         "nome_completo_norm": [full_name_norm(n) for n in names],
-        "nome_completo_phon": [full_name_phon(n) for n in names],
+        "nome_completo_phon": [full_name_phon_basic(n) for n in names],
         "primeiro_nome": list(primeiro),
         "nome_meio": list(meio),
         "ultimo_nome": list(ultimo),
-        "primeiro_nome_phon": [first_name_phon(n) for n in names],
-        "ultimo_nome_phon": [last_name_phon(n) for n in names],
+        "primeiro_nome_phon": [_token_phon_basic(t) for t in primeiro],
+        "ultimo_nome_phon": [_token_phon_basic(t) for t in ultimo],
     }
+    if strip_vowels:
+        out["nome_completo_phon_sv"] = [full_name_phon_sv(n) for n in names]
+        out["primeiro_nome_phon_sv"] = [_token_phon_sv(t) for t in primeiro]
+        out["ultimo_nome_phon_sv"] = [_token_phon_sv(t) for t in ultimo]
+    return out
 
 
-def _featurize_chunk(args: tuple[list,]) -> dict[str, list]:
-    (names,) = args
-    return _featurize_three_part_list(names)
+def _featurize_chunk(args: tuple[list, bool]) -> dict[str, list]:
+    names, strip_vowels = args
+    return _featurize_three_part_list(names, strip_vowels=strip_vowels)
 
 
 def featurize_three_part_names_batch(
@@ -185,8 +206,13 @@ def featurize_three_part_names_batch(
     where_sql: str = "",
     chunk_size: int = 500_000,
     n_workers: int | None = None,
+    strip_vowels: bool | None = None,
 ) -> None:
-    """Adiciona colunas de nome (primeiro/meio/último) a uma tabela staging."""
+    """Adiciona colunas de nome (primeiro/meio/último + fonética básica)."""
+    if strip_vowels is None:
+        from config import USE_PHONETIC_STRIP_VOWELS
+        strip_vowels = USE_PHONETIC_STRIP_VOWELS
+
     where_clause = f" WHERE {where_sql}" if where_sql else ""
     arrow = con.execute(f"SELECT * FROM {source_table}{where_clause}").fetch_arrow_table()
     if n_workers is None:
@@ -197,12 +223,16 @@ def featurize_three_part_names_batch(
         names = frame[name_col].to_list()
         n = len(names)
         if n_workers <= 1 or n <= chunk_size:
-            feat = _featurize_three_part_list(names)
+            feat = _featurize_three_part_list(names, strip_vowels=strip_vowels)
         else:
             chunks = [names[i : i + chunk_size] for i in range(0, n, chunk_size)]
             merged: dict[str, list] = {}
             with ProcessPoolExecutor(max_workers=n_workers) as pool:
-                for part in pool.map(_featurize_chunk, [(c,) for c in chunks], chunksize=1):
+                for part in pool.map(
+                    _featurize_chunk,
+                    [(c, strip_vowels) for c in chunks],
+                    chunksize=1,
+                ):
                     for col, vals in part.items():
                         merged.setdefault(col, []).extend(vals)
             feat = merged
@@ -214,7 +244,7 @@ def featurize_three_part_names_batch(
 
         frame = arrow.to_pandas()
         names = frame[name_col].tolist()
-        feat = _featurize_three_part_list(names)
+        feat = _featurize_three_part_list(names, strip_vowels=strip_vowels)
         for col, vals in feat.items():
             frame[col] = vals
         con.register("_feat_three", frame)

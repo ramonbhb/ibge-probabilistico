@@ -7,33 +7,39 @@ from pathlib import Path
 
 import duckdb
 
-# normalize_date_sql disponível via features (usado nos notebooks)
+from features import normalize_date_sql
 
 # =============================================================================
 # AJUSTE AQUI — caminhos, filtro UF e mapeamento de colunas bronze
 # =============================================================================
 #
 # Variáveis de ambiente: OUTPUT_DIR, CPF_ARQUIVO, CENSO_PESSOAS_ARQUIVO,
-# CENSO_ESPECIE2_ARQUIVO, COHORT_DEDUP_ARQUIVO, FILTRO_UF
+# CENSO_CEP_ARQUIVO, COHORT_DEDUP_ARQUIVO, FILTRO_UF
 
 PROB_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", PROB_DIR / "output")).expanduser()
+OUTPUT_DIR = Path(
+    os.environ.get("OUTPUT_DIR", Path.home() / "data/probabilistico_output")
+).expanduser()
 
 CENSO_DIR = Path(
     os.environ.get("CENSO_DIR", Path.home() / "singed/bases/bronze/censo")
+).expanduser()
+
+CENSO_RAW_DIR = Path(
+    os.environ.get("CENSO_RAW_DIR", Path.home() / "singed/bases/raw/Censo")
+).expanduser()
+
+CENSO_CEP_ARQUIVO = Path(
+    os.environ.get(
+        "CENSO_CEP_ARQUIVO",
+        CENSO_RAW_DIR / "data_cep_uniq.csv",
+    )
 ).expanduser()
 
 CENSO_PESSOAS_ARQUIVO = Path(
     os.environ.get(
         "CENSO_PESSOAS_ARQUIVO",
         CENSO_DIR / "censo_pessoas_2022_20260505.parquet",
-    )
-).expanduser()
-
-CENSO_ESPECIE2_ARQUIVO = Path(
-    os.environ.get(
-        "CENSO_ESPECIE2_ARQUIVO",
-        CENSO_DIR / "censo_especie2_2022_20260505.parquet",
     )
 ).expanduser()
 
@@ -68,6 +74,10 @@ CPF_NORM_SQL = "lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 
 CPF_COL_CPF = "COD_CPF"
 CPF_COL_NOME = "NOM_PESSOA"
 CPF_COL_DATA_NASC = "DAT_NASCIMENTO"
+CPF_COL_NOME_MAE = "NOM_MAE"
+CPF_COL_SEXO = "COD_SEXO"
+CPF_COL_UF = "COD_UFMUN"
+CPF_COL_CEP = "COD_CEP"
 
 CENSO_COL_ID_MORADOR = "ID_MORADOR"
 CENSO_COL_ID_DOMICILIO = "ID_DOMICILIO"
@@ -76,42 +86,99 @@ CENSO_COL_SOBRENOME = "PECP0357"
 CENSO_COL_DOB_ANO = "PECP0008"
 CENSO_COL_DOB_MES = "PECP0036"
 CENSO_COL_DOB_DIA = "PECP0006"
+CENSO_COL_SEXO = "PECP0002"
+CENSO_COL_RELACAO = "PECP0004"
+CENSO_COL_UF = "B0001"
+# Chaves de join pessoas ↔ data_cep_uniq.csv
 CENSO_COL_SETOR = "B0000"
-CENSO_COL_ENDERECO = "B0006"
 CENSO_COL_QUADRA = "NUM_QUADRA"
 CENSO_COL_FACE = "NUM_FACE"
-CENSO_COL_SEQ_ESPECIE = "COD_SEQ_ESPECIE"
 
-# Placeholders — preencher após DESCRIBE no NB00 (None = coluna ausente / NULL)
-CPF_COL_NOME_MAE: str | None = os.environ.get("CPF_COL_NOME_MAE") or None
-CPF_COL_SEXO: str | None = os.environ.get("CPF_COL_SEXO") or None
-CPF_COL_CEP: str | None = os.environ.get("CPF_COL_CEP") or None
-CPF_COL_ESTADO: str | None = os.environ.get("CPF_COL_ESTADO") or None
-CPF_COL_UF: str | None = os.environ.get("CPF_COL_UF") or None
+# Colunas em data_cep_uniq.csv
+CEP_COL_UF = "COD_UF"
+CEP_COL_MUNICIPIO = "COD_MUNICIPIO"
+CEP_COL_DISTRITO = "COD_DISTRITO"
+CEP_COL_SUBDISTRITO = "COD_SUBDISTRITO"
+CEP_COL_SETOR = "COD_SETOR"
+CEP_COL_QUADRA = "NUM_QUADRA"
+CEP_COL_FACE = "NUM_FACE"
+CEP_COL_CEP = "CEP"
+CEP_COL_LOG = "NO_LOG"
 
-CENSO_COL_NOME_MAE: str | None = os.environ.get("CENSO_COL_NOME_MAE") or None
-CENSO_COL_SEXO: str | None = os.environ.get("CENSO_COL_SEXO") or None
-CENSO_COL_CEP: str | None = os.environ.get("CENSO_COL_CEP") or None
-CENSO_COL_ESTADO: str | None = os.environ.get("CENSO_COL_ESTADO") or None
+USE_PHONETIC_STRIP_VOWELS = os.environ.get(
+    "USE_PHONETIC_STRIP_VOWELS", "false"
+).lower() in ("1", "true", "yes")
 
-# espécie2 — chaves de join e CEP domiciliar (ajustar após DESCRIBE)
-ESPECIE2_COL_SETOR = "COD_SETOR"
-ESPECIE2_COL_QUADRA = "NUM_QUADRA"
-ESPECIE2_COL_FACE = "NUM_FACE"
-ESPECIE2_COL_ENDERECO = "COD_ENDERECO"
-ESPECIE2_COL_SEQ = "SEQ_ESPECIE"
-ESPECIE2_COL_CEP: str | None = os.environ.get("ESPECIE2_COL_CEP") or None
-
-DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "8"))
-DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "32GB")
+DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "20"))
+DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "300GB")
 
 
 def cpf_norm_sql(col: str) -> str:
     return CPF_NORM_SQL.format(col=col)
 
 
-def censo_uf_sql(col: str = f"p.{CENSO_COL_SETOR}") -> str:
-    return f"substr(lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 12, '0'), 1, 2)"
+def cpf_uf_sql(col: str) -> str:
+    """UF (2 dígitos IBGE) a partir de COD_UFMUN ou similar."""
+    digits = f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0')"
+    return f"substr({digits}, 1, 2)"
+
+
+def censo_uf_sql(alias: str = "p") -> str:
+    """UF do morador Censo (coluna B0001 ou configurada em CENSO_COL_UF)."""
+    col = f'{alias}."{CENSO_COL_UF}"'
+    return f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0')"
+
+
+def cpf_uf_expr(alias: str = "c") -> str:
+    return cpf_uf_sql(f'{alias}."{CPF_COL_UF}"')
+
+
+def censo_uf_expr(alias: str = "p") -> str:
+    return censo_uf_sql(alias)
+
+
+def setor_norm_sql(col: str) -> str:
+    """Normaliza código de setor censitário (15 díg.) para join."""
+    return (
+        f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 15, '0')"
+    )
+
+
+def censo_cep_join_on(p_alias: str = "p", cep_alias: str = "k") -> str:
+    """Condição ON para join censo_pessoas ↔ lookup de CEP."""
+    return f"""{setor_norm_sql(f'{p_alias}.{CENSO_COL_SETOR}')} = {cep_alias}.cod_setor_norm
+        AND CAST({p_alias}.{CENSO_COL_QUADRA} AS VARCHAR) = {cep_alias}.num_quadra
+        AND CAST({p_alias}.{CENSO_COL_FACE} AS VARCHAR) = {cep_alias}.num_face"""
+
+
+def materialize_censo_cep_lookup(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    source_path: Path | None = None,
+    target_table: str = "censo_cep_lookup",
+    filtro_uf: str | None = FILTRO_UF,
+) -> None:
+    """Materializa lookup de CEP a partir de data_cep_uniq.csv (opcionalmente filtrado por UF)."""
+    path = (source_path or CENSO_CEP_ARQUIVO).expanduser()
+    uf_clause = "TRUE"
+    if filtro_uf:
+        safe = filtro_uf.replace("'", "''")
+        uf_col = f'c."{CEP_COL_UF}"'
+        uf_clause = (
+            f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0') = '{safe}'"
+        )
+
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {target_table} AS
+    SELECT
+        {setor_norm_sql(f'c."{CEP_COL_SETOR}"')} AS cod_setor_norm,
+        CAST(c."{CEP_COL_QUADRA}" AS VARCHAR) AS num_quadra,
+        CAST(c."{CEP_COL_FACE}" AS VARCHAR) AS num_face,
+        {cep_norm_sql(f'MIN(c."{CEP_COL_CEP}")')} AS cep
+    FROM read_csv('{path}', header=true, auto_detect=true) c
+    WHERE {uf_clause}
+    GROUP BY 1, 2, 3
+    """)
 
 
 def censo_dob_sql(
@@ -244,7 +311,8 @@ def print_paths() -> None:
     print("OUTPUT_DIR:", OUTPUT_DIR)
     print("CPF_ARQUIVO:", CPF_ARQUIVO)
     print("CENSO_PESSOAS_ARQUIVO:", CENSO_PESSOAS_ARQUIVO)
-    print("CENSO_ESPECIE2_ARQUIVO:", CENSO_ESPECIE2_ARQUIVO)
+    print("CENSO_CEP_ARQUIVO:", CENSO_CEP_ARQUIVO)
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)
     print("FILTRO_UF:", FILTRO_UF)
+    print("USE_PHONETIC_STRIP_VOWELS:", USE_PHONETIC_STRIP_VOWELS)
     print("DUCKDB_ARQUIVO:", DUCKDB_ARQUIVO)

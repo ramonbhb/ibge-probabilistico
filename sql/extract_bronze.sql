@@ -1,31 +1,9 @@
--- Snippets de referência para o NB00 (copiar/adaptar no notebook).
--- Parametrize FILTRO_UF via config.py antes de executar.
+-- Snippets de referência para o NB00 (copiar/adaptar).
 
--- ---------------------------------------------------------------------------
--- 1. Inspecionar bronze
--- ---------------------------------------------------------------------------
--- DESCRIBE SELECT * FROM read_parquet('~/singed/bases/bronze/cpf/cpf.parquet') LIMIT 0;
--- DESCRIBE SELECT * FROM read_parquet('.../censo_pessoas_....parquet') LIMIT 0;
--- DESCRIBE SELECT * FROM read_parquet('.../censo_especie2_....parquet') LIMIT 0;
+-- UF CPF: substr(COD_UFMUN, 1, 2) via cpf_uf_expr('c')
+-- UF Censo: B0001 via censo_uf_expr('p')
+-- CEP Censo: materialize_censo_cep_lookup(con) + LEFT JOIN censo_morador_cep
+--   ON B0000=COD_SETOR, NUM_QUADRA, NUM_FACE (data_cep_uniq.csv)
 
--- ---------------------------------------------------------------------------
--- 2. Filtro UF — Censo (código IBGE nos 2 primeiros dígitos do setor)
--- ---------------------------------------------------------------------------
--- WHERE :filtro_uf IS NULL
---    OR substr(lpad(regexp_replace(CAST(p.B0000 AS VARCHAR), '[^0-9]', '', 'g'), 12, '0'), 1, 2) = :filtro_uf
-
--- ---------------------------------------------------------------------------
--- 3. Filtro UF — CPF (ajustar coluna em config.CPF_COL_UF)
--- ---------------------------------------------------------------------------
--- WHERE :filtro_uf IS NULL OR CAST(cpf."SIGLA_UF" AS VARCHAR) = :filtro_uf
-
--- ---------------------------------------------------------------------------
--- 4. Join Censo pessoas + espécie2 (CEP domiciliar)
--- ---------------------------------------------------------------------------
--- FROM censo_pessoas_filtrado p
--- LEFT JOIN censo_especie2_filtrado e
---   ON p.B0000 = e.COD_SETOR
---  AND p.NUM_QUADRA = e.NUM_QUADRA
---  AND p.NUM_FACE = e.NUM_FACE
---  AND p.B0006 = e.COD_ENDERECO
---  AND p.COD_SEQ_ESPECIE = e.SEQ_ESPECIE
+-- Inferência nome da mãe (após filtro UF): inferir_nome_mae_duckdb(con, source_table='censo_pessoas_filtrado')
+-- Join: censo_staging LEFT JOIN censo_pais_inferidos ON person_id_censo

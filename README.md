@@ -4,61 +4,45 @@ Pipeline interativo (notebooks + DuckDB) para empilhar **bases bronze** CPF e Ce
 
 ## Pré-requisitos
 
-1. Parquets bronze:
-   - `~/singed/bases/bronze/cpf/cpf.parquet`
-   - `~/singed/bases/bronze/censo/censo_pessoas_*.parquet`
-   - `~/singed/bases/bronze/censo/censo_especie2_*.parquet`
-2. Coorte atualizada: `~/capefe/dados/CohortDados/cohort_dedup.parquet` ([`cohort/`](../cohort/))
-
-## Instalação
-
-```bash
-cd probabilistico
-pip install -e .
-# opcional: reutilizar normalização do monorepo
-pip install -e ../ibge-listas
-```
+1. Parquets bronze + `cohort_dedup.parquet` ([`cohort/`](../cohort/))
+2. `pip install -e .` em `probabilistico/`
 
 ## Configuração
 
-Edite [`config.py`](config.py) ou exporte variáveis:
+Edite [`config.py`](config.py) ou exporte:
 
 ```bash
-export FILTRO_UF=35                    # SP — None = nacional
-export CPF_ARQUIVO=~/singed/bases/bronze/cpf/cpf.parquet
-export COHORT_DEDUP_ARQUIVO=~/capefe/dados/CohortDados/cohort_dedup.parquet
-# placeholders (preencher após DESCRIBE no NB00):
-export CPF_COL_NOME_MAE=NOM_MAE
-export CENSO_COL_NOME_MAE=PECP0123
-export ESPECIE2_COL_CEP=NUM_CEP
+export FILTRO_UF=35
+export OUTPUT_DIR=~/data/probabilistico_output
+export USE_PHONETIC_STRIP_VOWELS=false   # true = colunas *_phon_sv (remove vogais)
+# CENSO_CEP_ARQUIVO default: ~/singed/bases/raw/Censo/data_cep_uniq.csv
 ```
 
 ## Notebooks
 
-Execute com cwd = `probabilistico/`.
-
 | Notebook | Função |
 |----------|--------|
-| [`notebooks/00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → DuckDB → `registro_unificado` + `ground_truth_clusters` |
-| [`notebooks/01_explorar_variaveis.ipynb`](notebooks/01_explorar_variaveis.ipynb) | Profile, blocking analysis, draft Splink settings |
-| [`notebooks/02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Treino Splink, dedupe, métricas vs coorte |
+| [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF → inferência mãe → CEP (`data_cep_uniq`) → stack + GT |
+| [`01_explorar_variaveis.ipynb`](notebooks/01_explorar_variaveis.ipynb) | Profile, blocking, draft settings |
+| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Splink + métricas vs coorte |
 
-Referência Splink: [`notebooks/_exemplo/deduplicate_50k_synthetic.ipynb`](notebooks/_exemplo/deduplicate_50k_synthetic.ipynb).
+**REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer.
 
-## Saídas
-
-| Arquivo | Descrição |
-|---------|-----------|
-| `output/probabilistico.duckdb` | DuckDB persistente |
-| `output/registro_unificado.parquet` | Stack Censo + CPF (schema Splink) |
-| `output/ground_truth_clusters.parquet` | Labels `cluster` da coorte |
-| `output/splink_settings_draft.json` | Settings candidatos (NB01) |
-| `output/splink_predictions.parquet` | Pares preditos (NB02) |
+Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência mãe didática).
 
 ## Variáveis unificadas
 
-Nome completo, primeiro/meio/último, nome da mãe, sexo, data de nascimento, CEP, estado, UF, `cpf_norm` (balizador — opcional no match).
+- Nome: completo, primeiro/meio/último
+- **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py))
+- **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
+- Sexo, DOB, CEP, **UF** (sem coluna `estado`)
+- Fonética **básica** sempre: `*_phon` (substituições PT-BR)
+- Fonética **agressiva** opcional: `*_phon_sv` (`USE_PHONETIC_STRIP_VOWELS=true`)
+
+## Saídas
+
+`~/data/probabilistico_output/`: `probabilistico.duckdb`, `registro_unificado.parquet`, `ground_truth_clusters.parquet`, artefatos Splink.
 
 ## Ground truth
 
-Somente [`cohort_dedup.parquet`](../cohort/README.md) — ouro + prata, todas as fontes. **Não** usa listas ouro como entrada de dados.
+Somente `cohort_dedup.parquet` — ouro + prata. Listas ouro **não** entram como dado de entrada.
