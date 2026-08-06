@@ -1,0 +1,193 @@
+"""Paridade entre a featurização SQL (DuckDB) e a implementação Python de referência."""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+import duckdb
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from features import (  # noqa: E402
+    br_phonetic_basic_token,
+    br_phonetic_token,
+    full_name_norm,
+    full_name_phon_basic,
+    full_name_phon_sv,
+    name_feature_columns_sql,
+    normalize_text_sql,
+    select_list_sql,
+    split_name_three_parts,
+)
+
+NOMES = [
+    "José da Silva",
+    "MARIA DAS GRAÇAS",
+    "Ana Beatriz Kühn",
+    "Wanderley Y. Zacharias",
+    "Philippe Schwartz",
+    "Guilherme Guimarães",
+    "Joaquim Queiroz Quintela",
+    "Nascimento Cheira Chácara",
+    "Cecília Cícero Célia",
+    "Gilberto Gil Gêmeo",
+    "Aaaa Bbbb Cccc",
+    "Hilda Hoffmann Horta",
+    "Assunção Exceção Excelso",
+    "Mitzi Katz Fritz",
+    "Carvalho",
+    "",
+    "   ",
+    "nan",
+    "NULL",
+    "None",
+    "O'CONNOR-SMITH",
+    "Anna Karolyna Wanderlyz",
+    "Ximenes Xisto Xuxa",
+    "Ludwig van Beethoven",
+    "MARIA   DE    FATIMA",
+    "Ilha Solteira 2 do Norte",
+    "Ç ç Ñ ñ",
+    "Æneas Œuvre",
+    "Renê\tDescartes\nCartesius",
+    "Vitor\x0bHugo\rMenezes\x0cFilho",
+    "A",
+    "A B",
+    "A B C",
+    "A B C D",
+]
+
+CHAVES = [
+    "nome_completo_norm",
+    "nome_completo_phon",
+    "primeiro_nome",
+    "nome_meio",
+    "ultimo_nome",
+    "primeiro_nome_phon",
+    "ultimo_nome_phon",
+    "nome_completo_phon_sv",
+    "primeiro_nome_phon_sv",
+    "ultimo_nome_phon_sv",
+]
+
+
+def referencia_python(nome: str) -> dict[str, str]:
+    primeiro, meio, ultimo = split_name_three_parts(nome)
+    return {
+        "nome_completo_norm": full_name_norm(nome),
+        "nome_completo_phon": full_name_phon_basic(nome),
+        "primeiro_nome": primeiro,
+        "nome_meio": meio,
+        "ultimo_nome": ultimo,
+        "primeiro_nome_phon": br_phonetic_basic_token(primeiro) if primeiro else "",
+        "ultimo_nome_phon": br_phonetic_basic_token(ultimo) if ultimo else "",
+        "nome_completo_phon_sv": full_name_phon_sv(nome),
+        "primeiro_nome_phon_sv": (
+            br_phonetic_token(primeiro, strip_vowels=True) if primeiro else ""
+        ),
+        "ultimo_nome_phon_sv": (
+            br_phonetic_token(ultimo, strip_vowels=True) if ultimo else ""
+        ),
+    }
+
+
+@pytest.fixture(scope="module")
+def resultado_sql() -> dict[str, dict[str, str]]:
+    con = duckdb.connect()
+    con.execute("CREATE TABLE bruto (id INTEGER, nome VARCHAR)")
+    con.executemany(
+        "INSERT INTO bruto VALUES (?, ?)", list(enumerate(NOMES))
+    )
+    cols = name_feature_columns_sql("nome_norm", strip_vowels=True)
+    sql = f"""
+    WITH norm AS (
+        SELECT id, {normalize_text_sql('nome')} AS nome_norm FROM bruto
+    )
+    SELECT id, {select_list_sql(cols)} FROM norm ORDER BY id
+    """
+    linhas = con.execute(sql).fetchall()
+    nomes_col = [d[0] for d in con.execute(sql).description]
+    con.close()
+    return {
+        NOMES[linha[0]]: dict(zip(nomes_col[1:], linha[1:])) for linha in linhas
+    }
+
+
+@pytest.mark.parametrize("nome", NOMES, ids=lambda n: repr(n))
+def test_paridade_sql_python(nome: str, resultado_sql) -> None:
+    esperado = referencia_python(nome)
+    obtido = resultado_sql[nome]
+    for chave in CHAVES:
+        assert obtido[chave] == esperado[chave], (
+            f"{chave} divergiu em {nome!r}: "
+            f"SQL={obtido[chave]!r} Python={esperado[chave]!r}"
+        )
+
+
+def test_divergencia_conhecida_ligaturas() -> None:
+    """strip_accents do DuckDB não decompõe ligaduras; o NFKD do Python decompõe.
+
+    Divergência aceita: ligaduras tipográficas não ocorrem em nome de registro
+    civil, e cobri-las custaria replaces extras em todas as linhas. Nos dois
+    casos o caractere não sobrevive como letra, então o efeito é local.
+    """
+    literal = "'" + chr(0xFB01) + "LHO'"
+    con = duckdb.connect()
+    sql_out = con.execute(f"SELECT {normalize_text_sql(literal)}").fetchone()[0]
+    con.close()
+    assert full_name_norm("\ufb01lho") == "FILHO"
+    assert sql_out == "LHO"
+
+
+def test_nome_mae_renomeia_colunas() -> None:
+    from features import NOME_MAE_COLUMNS
+
+    cols = name_feature_columns_sql(
+        "nome_mae_norm", strip_vowels=True, col_map=NOME_MAE_COLUMNS
+    )
+    assert set(cols) == set(NOME_MAE_COLUMNS.values())
+    assert cols["nome_mae"] == "nome_mae_norm"
+
+
+def test_sem_strip_vowels_omite_colunas_sv() -> None:
+    cols = name_feature_columns_sql("nome_norm", strip_vowels=False)
+    assert not any(alias.endswith("_phon_sv") for alias in cols)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("BENCH_SQL"),
+    reason="benchmark opcional; rode com BENCH_SQL=1",
+)
+def test_benchmark_list_reduce() -> None:
+    """Custo do dedupe por list_reduce numa amostra de alguns milhões de linhas."""
+    n = int(os.environ.get("BENCH_SQL_N", 5_000_000))
+    con = duckdb.connect()
+    con.execute(
+        f"""
+        CREATE TABLE amostra AS
+        SELECT list_element(
+            ['José da Silva', 'MARIA DAS GRAÇAS', 'Guilherme Guimarães',
+             'Philippe Schwartz', 'Assunção Exceção'],
+            (i % 5) + 1
+        ) AS nome
+        FROM range({n}) t(i)
+        """
+    )
+    cols = name_feature_columns_sql("nome_norm", strip_vowels=True)
+    # Materializa: com um count(*) o DuckDB elimina a projeção inteira.
+    sql = f"""
+    CREATE TABLE saida AS
+    WITH norm AS (SELECT {normalize_text_sql('nome')} AS nome_norm FROM amostra)
+    SELECT {select_list_sql(cols)} FROM norm
+    """
+    inicio = time.perf_counter()
+    con.execute(sql)
+    duracao = time.perf_counter() - inicio
+    total = con.execute("SELECT count(*) FROM saida").fetchone()[0]
+    con.close()
+    assert total == n
+    print(f"\n{n:,} linhas em {duracao:.1f}s ({n / duracao / 1e6:.2f}M linhas/s)")

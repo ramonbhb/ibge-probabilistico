@@ -2,21 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import re
 import sys
 import unicodedata
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import duckdb
-
-try:
-    import polars as pl
-except ImportError:  # pragma: no cover
-    pl = None  # type: ignore[assignment,misc]
 
 # Shim ibge_common quando ibge-listas está no path
 _IBGE_LISTAS = Path(__file__).resolve().parent.parent / "ibge-listas"
@@ -148,14 +137,6 @@ def split_name_three_parts(name) -> tuple[str, str, str]:
     return toks[0], " ".join(toks[1:-1]), toks[-1]
 
 
-def _token_phon_basic(token: str) -> str:
-    return br_phonetic_basic_token(token) if token else ""
-
-
-def _token_phon_sv(token: str) -> str:
-    return br_phonetic_token(token, strip_vowels=True) if token else ""
-
-
 def normalize_sexo(sexo) -> str:
     s = normalize_text(sexo)
     if s in {"M", "MASC", "MASCULINO", "1"}:
@@ -179,22 +160,6 @@ def normalize_sexo_sql(col: str) -> str:
     END"""
 
 
-def register_linkage_udfs(con) -> None:
-    """Registra UDFs para normalização em SQL (ex.: norm_text para nome_mae)."""
-    import duckdb
-
-    try:
-        con.create_function("norm_text", normalize_text, ["VARCHAR"], "VARCHAR")
-    except duckdb.Error:
-        con.remove_function("norm_text")
-        con.create_function("norm_text", normalize_text, ["VARCHAR"], "VARCHAR")
-
-
-def normalize_nome_mae_sql(col: str) -> str:
-    """nome_mae normalizado via UDF norm_text (chame register_linkage_udfs antes)."""
-    return f"NULLIF(norm_text(CAST({col} AS VARCHAR)), '')"
-
-
 def normalize_cep(cep) -> str:
     if cep is None:
         return ""
@@ -204,142 +169,161 @@ def normalize_cep(cep) -> str:
     return digits.zfill(8)[:8]
 
 
-def _featurize_three_part_list(names: list, *, strip_vowels: bool = False) -> dict[str, list]:
-    primeiro, meio, ultimo = zip(*(split_name_three_parts(n) for n in names)) if names else ([], [], [])
-    out: dict[str, list] = {
-        "nome_completo_norm": [full_name_norm(n) for n in names],
-        "nome_completo_phon": [full_name_phon_basic(n) for n in names],
-        "primeiro_nome": list(primeiro),
-        "nome_meio": list(meio),
-        "ultimo_nome": list(ultimo),
-        "primeiro_nome_phon": [_token_phon_basic(t) for t in primeiro],
-        "ultimo_nome_phon": [_token_phon_basic(t) for t in ultimo],
-    }
-    if strip_vowels:
-        out["nome_completo_phon_sv"] = [full_name_phon_sv(n) for n in names]
-        out["primeiro_nome_phon_sv"] = [_token_phon_sv(t) for t in primeiro]
-        out["ultimo_nome_phon_sv"] = [_token_phon_sv(t) for t in ultimo]
-    return out
+# =============================================================================
+# Featurização em SQL — espelha as funções Python acima
+# =============================================================================
+#
+# O RE2 do DuckDB não tem lookahead nem backreference no padrão, então dois
+# trechos precisam de tradução indireta:
+#   - C(?=[EI]) vira 'C([EI])' -> 'S\1' (o \1 vale na substituição, não no padrão)
+#   - _dedupe_consecutive vira list_reduce sobre a lista de caracteres
 
 
-def _featurize_chunk(args: tuple[list, bool]) -> dict[str, list]:
-    names, strip_vowels = args
-    return _featurize_three_part_list(names, strip_vowels=strip_vowels)
-
-
-def featurize_three_part_names_batch(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    source_table: str,
-    target_table: str,
-    name_col: str,
-    where_sql: str = "",
-    chunk_size: int = 500_000,
-    n_workers: int | None = None,
-    strip_vowels: bool | None = None,
-) -> None:
-    """Adiciona colunas de nome (primeiro/meio/último + fonética básica)."""
-    if strip_vowels is None:
-        from config import USE_PHONETIC_STRIP_VOWELS
-        strip_vowels = USE_PHONETIC_STRIP_VOWELS
-
-    where_clause = f" WHERE {where_sql}" if where_sql else ""
-    arrow = con.execute(f"SELECT * FROM {source_table}{where_clause}").fetch_arrow_table()
-    if n_workers is None:
-        n_workers = min(os.cpu_count() or 4, 8)
-
-    if pl is not None:
-        frame = pl.from_arrow(arrow)
-        names = frame[name_col].to_list()
-        n = len(names)
-        if n_workers <= 1 or n <= chunk_size:
-            feat = _featurize_three_part_list(names, strip_vowels=strip_vowels)
-        else:
-            chunks = [names[i : i + chunk_size] for i in range(0, n, chunk_size)]
-            merged: dict[str, list] = {}
-            with ProcessPoolExecutor(max_workers=n_workers) as pool:
-                for part in pool.map(
-                    _featurize_chunk,
-                    [(c, strip_vowels) for c in chunks],
-                    chunksize=1,
-                ):
-                    for col, vals in part.items():
-                        merged.setdefault(col, []).extend(vals)
-            feat = merged
-        for col, vals in feat.items():
-            frame = frame.with_columns(pl.Series(col, vals))
-        con.register("_feat_three", frame.to_arrow())
-    else:
-        import pandas as pd
-
-        frame = arrow.to_pandas()
-        names = frame[name_col].tolist()
-        feat = _featurize_three_part_list(names, strip_vowels=strip_vowels)
-        for col, vals in feat.items():
-            frame[col] = vals
-        con.register("_feat_three", frame)
-
-    con.execute(f"CREATE OR REPLACE TABLE {target_table} AS SELECT * FROM _feat_three")
-    con.unregister("_feat_three")
-
-
-def split_name_parts_sql(name_col: str) -> dict[str, str]:
-    """Expressões SQL DuckDB: split primeiro/meio/último (sem fonética)."""
-    nome = (
-        f"trim(upper(CAST({name_col} AS VARCHAR)))"
+def normalize_text_sql(col: str) -> str:
+    """normalize_text() em SQL: maiúsculas, sem acento, só A-Z0-9 e espaço simples."""
+    texto = f"trim(upper(CAST({col} AS VARCHAR)))"
+    limpo = (
+        f"regexp_replace(regexp_replace(strip_accents({texto}), "
+        f"'[^A-Z0-9\\s]', ' ', 'g'), '\\s+', ' ', 'g')"
     )
-    empty = f"({nome} IS NULL OR {nome} IN ('', 'NAN', 'NONE', 'NULL'))"
-    toks = f"string_split_regex({nome}, '\\s+')"
+    return (
+        f"CASE WHEN {col} IS NULL OR {texto} IN ('', 'NAN', 'NONE', 'NULL') "
+        f"THEN '' ELSE trim({limpo}) END"
+    )
+
+
+def dedupe_consecutive_sql(expr: str) -> str:
+    """_dedupe_consecutive() em SQL, via redução da lista de caracteres.
+
+    O chr(1) inicial resolve dois problemas de uma vez: garante lista não vazia
+    (list_reduce exige ao menos um elemento no DuckDB 1.0) e faz a expressão
+    aparecer uma única vez, evitando explosão do texto SQL ao aninhar.
+    """
+    caracteres = f"regexp_extract_all(chr(1) || ({expr}), '.')"
+    reduce_ = (
+        f"list_reduce({caracteres}, "
+        f"(acc, c) -> CASE WHEN ends_with(acc, c) THEN acc ELSE acc || c END)"
+    )
+    return f"substr({reduce_}, 2)"
+
+
+def _phonetic_map_sql(expr: str) -> str:
+    """Substituições de br_phonetic_basic_token(), sem o dedupe final."""
+    out = expr
+    for a, b in _PHONETIC_REPLACEMENTS:
+        out = f"replace({out}, '{a}', '{b}')"
+    out = f"regexp_replace({out}, 'C([EI])', 'S\\1', 'g')"
+    out = f"regexp_replace({out}, 'G([EI])', 'J\\1', 'g')"
+    return f"replace(replace({out}, 'Q', 'K'), 'C', 'K')"
+
+
+def phonetic_token_sql(expr: str, *, strip_vowels: bool = False) -> str:
+    """br_phonetic_token() em SQL, para um token já normalizado."""
+    basico = dedupe_consecutive_sql(_phonetic_map_sql(expr))
+    if not strip_vowels:
+        return basico
+    # O Python só remove vogais quando len > 1, mas o guarda é dispensável:
+    # para '' e para um caractere único as duas expressões coincidem.
+    sem_vogais = (
+        f"substr({basico}, 1, 1) || "
+        f"regexp_replace(substr({basico}, 2), '[AEIOU]', '', 'g')"
+    )
+    return dedupe_consecutive_sql(sem_vogais)
+
+
+def phonetic_name_sql(norm_col: str, *, strip_vowels: bool = False) -> str:
+    """full_name_phon_*() em SQL: fonética por token, descartando os vazios."""
+    token_expr = phonetic_token_sql("_tok", strip_vowels=strip_vowels)
+    tokens = f"list_transform(string_split({norm_col}, ' '), _tok -> {token_expr})"
+    return f"array_to_string(list_filter({tokens}, _v -> _v <> ''), ' ')"
+
+
+def _split_parts_sql(norm_col: str) -> dict[str, str]:
+    """split_name_three_parts() em SQL, sobre texto já normalizado."""
+    toks = f"string_split({norm_col}, ' ')"
     n = f"len({toks})"
     return {
-        "nome_completo": f"CASE WHEN {empty} THEN '' ELSE {nome} END",
-        "primeiro_nome": (
-            f"CASE WHEN {empty} THEN '' "
-            f"WHEN {n} = 1 THEN {toks}[1] "
-            f"ELSE {toks}[1] END"
-        ),
-        "ultimo_nome": (
-            f"CASE WHEN {empty} OR {n} <= 1 THEN '' ELSE {toks}[{n}] END"
-        ),
+        "primeiro_nome": f"CASE WHEN {norm_col} = '' THEN '' ELSE {toks}[1] END",
         "nome_meio": (
             f"CASE WHEN {n} <= 2 THEN '' "
             f"ELSE array_to_string(list_slice({toks}, 2, {n} - 1), ' ') END"
         ),
+        "ultimo_nome": (
+            f"CASE WHEN {norm_col} = '' OR {n} <= 1 THEN '' ELSE {toks}[{n}] END"
+        ),
     }
 
 
-def split_names_only_batch(
-    con: duckdb.DuckDBPyConnection,
+# Mapas de alias para name_feature_columns_sql: as chaves canônicas viram as
+# colunas da pessoa ou as do nome da mãe, a partir das mesmas expressões.
+PESSOA_COLUMNS = {
+    "nome_completo_norm": "nome_completo",
+    "nome_completo_phon": "nome_completo_phon",
+    "primeiro_nome": "primeiro_nome",
+    "nome_meio": "nome_meio",
+    "ultimo_nome": "ultimo_nome",
+    "primeiro_nome_phon": "primeiro_nome_phon",
+    "ultimo_nome_phon": "ultimo_nome_phon",
+    "nome_completo_phon_sv": "nome_completo_phon_sv",
+    "primeiro_nome_phon_sv": "primeiro_nome_phon_sv",
+    "ultimo_nome_phon_sv": "ultimo_nome_phon_sv",
+}
+
+NOME_MAE_COLUMNS = {
+    "nome_completo_norm": "nome_mae",
+    "nome_completo_phon": "nome_mae_phon",
+    "primeiro_nome": "primeiro_nome_mae",
+    "nome_meio": "nome_meio_mae",
+    "ultimo_nome": "ultimo_nome_mae",
+    "primeiro_nome_phon": "primeiro_nome_mae_phon",
+    "ultimo_nome_phon": "ultimo_nome_mae_phon",
+    "nome_completo_phon_sv": "nome_mae_phon_sv",
+    "primeiro_nome_phon_sv": "primeiro_nome_mae_phon_sv",
+    "ultimo_nome_phon_sv": "ultimo_nome_mae_phon_sv",
+}
+
+
+def name_feature_columns_sql(
+    norm_col: str,
     *,
-    source_table: str,
-    target_table: str,
-    name_col: str,
-    where_sql: str = "",
-) -> None:
-    """Split primeiro/meio/último em SQL puro; *_phon espelham texto (stub Splink)."""
-    from config import USE_PHONETIC_STRIP_VOWELS
+    strip_vowels: bool | None = None,
+    col_map: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Colunas de nome (split + fonética) a partir de uma coluna já normalizada.
 
-    parts = split_name_parts_sql(name_col)
-    where_clause = f" WHERE {where_sql}" if where_sql else ""
-    phon_sv_cols = ""
-    if USE_PHONETIC_STRIP_VOWELS:
-        phon_sv_cols = f""",
-        {parts['nome_completo']} AS nome_completo_phon_sv,
-        {parts['primeiro_nome']} AS primeiro_nome_phon_sv,
-        {parts['ultimo_nome']} AS ultimo_nome_phon_sv"""
+    Recebe o nome da coluna, não a expressão de normalização: aplicar sobre
+    `normalize_text_sql(...)` direto repetiria essa expressão dezenas de vezes.
+    Normalize num estágio anterior (CTE) e passe o identificador aqui.
+    """
+    if strip_vowels is None:
+        from config import USE_PHONETIC_STRIP_VOWELS
 
-    con.execute(f"""
-    CREATE OR REPLACE TABLE {target_table} AS
-    SELECT
-        s.*,
-        {parts['nome_completo']} AS nome_completo,
-        {parts['primeiro_nome']} AS primeiro_nome,
-        {parts['nome_meio']} AS nome_meio,
-        {parts['ultimo_nome']} AS ultimo_nome,
-        {parts['nome_completo']} AS nome_completo_phon,
-        {parts['primeiro_nome']} AS primeiro_nome_phon,
-        {parts['ultimo_nome']} AS ultimo_nome_phon
-        {phon_sv_cols}
-    FROM {source_table} s
-    {where_clause}
-    """)
+        strip_vowels = USE_PHONETIC_STRIP_VOWELS
+
+    partes = _split_parts_sql(norm_col)
+    cols = {
+        "nome_completo_norm": norm_col,
+        "nome_completo_phon": phonetic_name_sql(norm_col),
+        "primeiro_nome": partes["primeiro_nome"],
+        "nome_meio": partes["nome_meio"],
+        "ultimo_nome": partes["ultimo_nome"],
+        "primeiro_nome_phon": phonetic_token_sql(partes["primeiro_nome"]),
+        "ultimo_nome_phon": phonetic_token_sql(partes["ultimo_nome"]),
+    }
+    if strip_vowels:
+        cols["nome_completo_phon_sv"] = phonetic_name_sql(norm_col, strip_vowels=True)
+        cols["primeiro_nome_phon_sv"] = phonetic_token_sql(
+            partes["primeiro_nome"], strip_vowels=True
+        )
+        cols["ultimo_nome_phon_sv"] = phonetic_token_sql(
+            partes["ultimo_nome"], strip_vowels=True
+        )
+    if col_map:
+        cols = {col_map[k]: v for k, v in cols.items() if k in col_map}
+    return cols
+
+
+def select_list_sql(cols: dict[str, str]) -> str:
+    """Transforma o dicionário de colunas num trecho de SELECT."""
+    return ",\n        ".join(f"{expr} AS {alias}" for alias, expr in cols.items())
+
