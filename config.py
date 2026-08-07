@@ -179,7 +179,7 @@ CENSO_COL_SEXO = "PECP0002"
 CENSO_COL_RELACAO = "PECP0004"
 # Mutuamente exclusivas, não valor e fallback: PECP0003 (3 díg.) só é preenchida
 # para quem tem 1 ano ou mais, PECP0030 (2 díg.) só para menores de 1 ano.
-CENSO_COL_IDADE_ANOS = "PECP0003"
+CENSO_COL_IDADE_ANOS = "PECP0401"
 CENSO_COL_IDADE_MESES = "PECP0030"
 CENSO_COL_UF = "B0001"
 # Chaves de join pessoas ↔ data_cep_uniq.csv
