@@ -80,6 +80,36 @@ except ImportError:
         return [tok for tok in name.split() if tok] if name else []
 
 
+# Partículas e placeholders removidos por replace com espaço: " DA " → " ".
+# Só tokens isolados (com espaço antes e depois); DEISE e DELMA não são afetados.
+PARTICULAS_NOME: tuple[str, ...] = (
+    "DA", "DE", "DI", "DO", "DU", "DAS", "DOS", "DES", "DEL", "E", "Y",
+)
+PLACEHOLDERS_NOME: tuple[str, ...] = (
+    "DESCONHECIDO", "DESCONHECIDA", "IGNORADO", "IGNORADA", "MAE",
+)
+TERMOS_RUIDO_NOME: tuple[str, ...] = PARTICULAS_NOME + PLACEHOLDERS_NOME
+
+
+def _strip_noise_terms(text: str) -> str:
+    """Remove partículas e placeholders por replace com espaço ao redor."""
+    if not text:
+        return ""
+    padded = f" {text} "
+    for termo in TERMOS_RUIDO_NOME:
+        padded = padded.replace(f" {termo} ", " ")
+    return re.sub(r"\s+", " ", padded).strip()
+
+
+def clean_name(text) -> str | None:
+    """Normaliza e remove partículas/placeholders; vazio vira None."""
+    norm = normalize_text(text)
+    if not norm:
+        return None
+    limpo = _strip_noise_terms(norm)
+    return limpo if limpo else None
+
+
 _PHONETIC_REPLACEMENTS = [
     ("PH", "F"), ("Y", "I"), ("W", "V"), ("CK", "K"), ("SCH", "X"),
     ("SH", "X"), ("CH", "X"), ("LH", "L"), ("NH", "N"), ("GUI", "GI"),
@@ -129,12 +159,19 @@ def full_name_phon_sv(name) -> str:
 
 
 def split_name_three_parts(name) -> tuple[str, str, str]:
-    toks = tokenize_name(name)
+    """Split em primeiro / meio / último sobre nome já limpo."""
+    limpo = clean_name(name) if name is not None else None
+    toks = limpo.split() if limpo else []
     if not toks:
         return "", "", ""
     if len(toks) == 1:
         return toks[0], "", ""
     return toks[0], " ".join(toks[1:-1]), toks[-1]
+
+
+def linkage_name_norm(name) -> str | None:
+    """Nome normalizado para linkage (com limpeza de partículas)."""
+    return clean_name(name)
 
 
 def normalize_date_compacta_sql(col: str) -> str:
@@ -213,6 +250,24 @@ def normalize_text_sql(col: str) -> str:
     )
 
 
+def strip_noise_sql(expr: str) -> str:
+    """Remove partículas e placeholders por replace `" TERMO "` → `" "`."""
+    out = f"' ' || {expr} || ' '"
+    for termo in TERMOS_RUIDO_NOME:
+        out = f"replace({out}, ' {termo} ', ' ')"
+    return f"trim(regexp_replace({out}, '\\s+', ' ', 'g'))"
+
+
+def clean_name_sql(col: str) -> str:
+    """normalize_text_sql + strip_noise_sql; string vazia vira NULL."""
+    norm = normalize_text_sql(col)
+    return f"NULLIF({strip_noise_sql(norm)}, '')"
+
+
+def _nullif_empty_sql(expr: str) -> str:
+    return f"NULLIF({expr}, '')"
+
+
 def dedupe_consecutive_sql(expr: str) -> str:
     """_dedupe_consecutive() em SQL, via redução da lista de caracteres.
 
@@ -284,9 +339,11 @@ PESSOA_COLUMNS = {
     "nome_meio": "nome_meio",
     "ultimo_nome": "ultimo_nome",
     "primeiro_nome_phon": "primeiro_nome_phon",
+    "nome_meio_phon": "nome_meio_phon",
     "ultimo_nome_phon": "ultimo_nome_phon",
     "nome_completo_phon_sv": "nome_completo_phon_sv",
     "primeiro_nome_phon_sv": "primeiro_nome_phon_sv",
+    "nome_meio_phon_sv": "nome_meio_phon_sv",
     "ultimo_nome_phon_sv": "ultimo_nome_phon_sv",
 }
 
@@ -297,9 +354,11 @@ NOME_MAE_COLUMNS = {
     "nome_meio": "nome_meio_mae",
     "ultimo_nome": "ultimo_nome_mae",
     "primeiro_nome_phon": "primeiro_nome_mae_phon",
+    "nome_meio_phon": "nome_meio_mae_phon",
     "ultimo_nome_phon": "ultimo_nome_mae_phon",
     "nome_completo_phon_sv": "nome_mae_phon_sv",
     "primeiro_nome_phon_sv": "primeiro_nome_mae_phon_sv",
+    "nome_meio_phon_sv": "nome_meio_mae_phon_sv",
     "ultimo_nome_phon_sv": "ultimo_nome_mae_phon_sv",
 }
 
@@ -310,35 +369,38 @@ def name_feature_columns_sql(
     strip_vowels: bool | None = None,
     col_map: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Colunas de nome (split + fonética) a partir de uma coluna já normalizada.
+    """Colunas de nome (split + fonética) a partir de coluna já limpa.
 
-    Recebe o nome da coluna, não a expressão de normalização: aplicar sobre
-    `normalize_text_sql(...)` direto repetiria essa expressão dezenas de vezes.
-    Normalize num estágio anterior (CTE) e passe o identificador aqui.
+    Espera `clean_name_sql` aplicado antes (partículas removidas, vazio = NULL).
+    Fonética é calculada uma vez no nome completo e repartida por split.
     """
     if strip_vowels is None:
         from config import USE_PHONETIC_STRIP_VOWELS
 
         strip_vowels = USE_PHONETIC_STRIP_VOWELS
 
-    partes = _split_parts_sql(norm_col)
+    safe = f"coalesce({norm_col}, '')"
+    partes = _split_parts_sql(safe)
+    completo_phon = phonetic_name_sql(safe)
+    partes_phon = _split_parts_sql(completo_phon)
+
     cols = {
         "nome_completo_norm": norm_col,
-        "nome_completo_phon": phonetic_name_sql(norm_col),
-        "primeiro_nome": partes["primeiro_nome"],
-        "nome_meio": partes["nome_meio"],
-        "ultimo_nome": partes["ultimo_nome"],
-        "primeiro_nome_phon": phonetic_token_sql(partes["primeiro_nome"]),
-        "ultimo_nome_phon": phonetic_token_sql(partes["ultimo_nome"]),
+        "nome_completo_phon": _nullif_empty_sql(completo_phon),
+        "primeiro_nome": _nullif_empty_sql(partes["primeiro_nome"]),
+        "nome_meio": _nullif_empty_sql(partes["nome_meio"]),
+        "ultimo_nome": _nullif_empty_sql(partes["ultimo_nome"]),
+        "primeiro_nome_phon": _nullif_empty_sql(partes_phon["primeiro_nome"]),
+        "nome_meio_phon": _nullif_empty_sql(partes_phon["nome_meio"]),
+        "ultimo_nome_phon": _nullif_empty_sql(partes_phon["ultimo_nome"]),
     }
     if strip_vowels:
-        cols["nome_completo_phon_sv"] = phonetic_name_sql(norm_col, strip_vowels=True)
-        cols["primeiro_nome_phon_sv"] = phonetic_token_sql(
-            partes["primeiro_nome"], strip_vowels=True
-        )
-        cols["ultimo_nome_phon_sv"] = phonetic_token_sql(
-            partes["ultimo_nome"], strip_vowels=True
-        )
+        completo_sv = phonetic_name_sql(safe, strip_vowels=True)
+        partes_sv = _split_parts_sql(completo_sv)
+        cols["nome_completo_phon_sv"] = _nullif_empty_sql(completo_sv)
+        cols["primeiro_nome_phon_sv"] = _nullif_empty_sql(partes_sv["primeiro_nome"])
+        cols["nome_meio_phon_sv"] = _nullif_empty_sql(partes_sv["nome_meio"])
+        cols["ultimo_nome_phon_sv"] = _nullif_empty_sql(partes_sv["ultimo_nome"])
     if col_map:
         cols = {col_map[k]: v for k, v in cols.items() if k in col_map}
     return cols

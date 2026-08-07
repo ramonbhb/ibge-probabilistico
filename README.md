@@ -72,7 +72,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 
 ## Variáveis unificadas
 
-- Nome: completo, primeiro/meio/último
+- Nome: completo, primeiro/meio/último (partículas `DA`, `DOS`, etc. e placeholders `DESCONHECIDO`, `MAE` removidos por [`clean_name_sql`](features.py); vazio → `NULL`)
 - **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py)). Sofre o mesmo split da pessoa: `primeiro_nome_mae`, `nome_meio_mae`, `ultimo_nome_mae`, com as fonéticas correspondentes. Vazio vira `NULL` (`NULLIF`), para o Splink não casar `'' = ''`
 - **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
 - Sexo, DOB, **idade** (anos na referência do Censo 2022), CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
@@ -83,7 +83,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 
 ### Idade
 
-No Censo as duas colunas **dividem a população**, não uma cobre a outra: `PECP0003` (3 díg.) é preenchida só para quem tem **1 ano ou mais**, `PECP0030` (2 díg.) só para **menores de 1 ano**. Quem tem meses preenchidos tem 0 ano completo — não se divide por 12. No CPF a idade é derivada de `data_nascimento`, então tudo que impede a data de parsear zera a idade junto.
+No Censo a idade vem de **`PECP0401`** (variável auxiliar calculada, 0–140 anos, universo). No CPF é derivada de `data_nascimento`. As colunas do questionário (`PECP0003`/`PECP0030`) ficam só no diagnóstico do NB00.
 
 Se a idade vier muito nula, a célula **3b do NB00** aponta a causa: tipos das colunas, contagem de nulos de cada lado e os valores crus mais frequentes. Dois casos conhecidos que zeram a idade do CPF inteiro:
 
@@ -92,7 +92,7 @@ Se a idade vier muito nula, a célula **3b do NB00** aponta a causa: tipos das c
 
 ### Featurização de nomes: SQL, não Python
 
-Normalização, split e fonética são expressões SQL do DuckDB geradas por [`features.py`](features.py) (`normalize_text_sql`, `name_feature_columns_sql`, `select_list_sql`). O NB00 monta `*_registros` direto do staging, sem tabela intermediária: pessoa e mãe saem do mesmo passe, apenas com aliases diferentes (`PESSOA_COLUMNS`, `NOME_MAE_COLUMNS`).
+Normalização (`normalize_text_sql`), limpeza de partículas/placeholders (`clean_name_sql`), split e fonética são expressões SQL do DuckDB geradas por [`features.py`](features.py). A fonética é calculada **uma vez** no nome completo e repartida nas três partes (`nome_meio_phon` incluído). O NB00 monta `*_registros` direto do staging, sem tabela intermediária: pessoa e mãe saem do mesmo passe, apenas com aliases diferentes (`PESSOA_COLUMNS`, `NOME_MAE_COLUMNS`).
 
 A versão anterior trazia a tabela inteira para a memória via `fetch_arrow_table()` antes de distribuir em `ProcessPoolExecutor`. Em SQL o processamento é vetorizado e em streaming, sem teto de RAM.
 
@@ -111,7 +111,7 @@ Duas classes de problema, um passe só sobre `registro_unificado`.
 
 **Valor-sentinela que o SQL lê como igualdade.** É o problema mais caro dos dois. `l.cep = r.cep` trata `'' = ''` e `'00000000' = '00000000'` como acordo real, então ausência vira par candidato; nas `deterministic_rules` do NB02 vira até match determinístico, contaminando a estimativa do prior. As três colunas afetadas nascem assim: `normalize_date_sql` devolve `''` quando a data não parseia, `cep_norm_sql` faz `lpad(..., 8, '0')` e transforma CEP ausente do CPF em `'00000000'` (o Censo usa `''` para o mesmo caso), e nome que não normaliza vira `''` — inclusive `primeiro_nome` e `ultimo_nome`, que estão na blocking rule principal. Todos viram `NULL`, que não casa com `NULL`.
 
-Data de nascimento inválida é a que não é data real (`2022-02-30` passa pelo `normalize_date_sql` quando já vem em ISO) ou tem ano fora de `[ANO_NASCIMENTO_MIN, ANO_REFERENCIA_CENSO]`. Quando a data do CPF cai, a `idade` cai junto, porque é derivada dela; a do Censo vem de `PECP0003` e não é tocada.
+Data de nascimento inválida é a que não é data real (`2022-02-30` passa pelo `normalize_date_sql` quando já vem em ISO) ou tem ano fora de `[ANO_NASCIMENTO_MIN, ANO_REFERENCIA_CENSO]`. Quando a data do CPF cai, a `idade` cai junto, porque é derivada dela; a do Censo vem de `PECP0401` e não é tocada.
 
 **Categoria residual de sexo.** O `normalize_sexo_sql` mapeia M/F e devolve a inicial de qualquer outra coisa: `'O'` de outro, `'I'` de ignorado, `'9'` de não informado. Para o `ExactMatch('sexo')` do NB02 dois resíduos iguais seriam concordância, e "ambos com sexo desconhecido" não é evidência de serem a mesma pessoa. Só `SEXO_VALIDOS` sobrevive. O NB00b imprime a distribuição completa com uma coluna `mantido` antes de aplicar a regra: se a base tiver uma terceira categoria real e com volume, anulá-la joga sinal fora e vale rever a constante.
 

@@ -177,10 +177,13 @@ CENSO_COL_DOB_MES = "PECP0036"
 CENSO_COL_DOB_DIA = "PECP0006"
 CENSO_COL_SEXO = "PECP0002"
 CENSO_COL_RELACAO = "PECP0004"
-# Mutuamente exclusivas, não valor e fallback: PECP0003 (3 díg.) só é preenchida
-# para quem tem 1 ano ou mais, PECP0030 (2 díg.) só para menores de 1 ano.
-CENSO_COL_IDADE_ANOS = "PECP0401"
+# Idade no Censo: PECP0401 é a variável auxiliar calculada (0–140 anos, universo).
+# PECP0003/PECP0030 são do questionário (amostra) e ficam só para diagnóstico.
+CENSO_COL_IDADE_CALC = "PECP0401"
+CENSO_COL_IDADE_ANOS_QUEST = "PECP0003"
 CENSO_COL_IDADE_MESES = "PECP0030"
+# Alias legado usado no diagnóstico do NB00
+CENSO_COL_IDADE_ANOS = CENSO_COL_IDADE_CALC
 CENSO_COL_UF = "B0001"
 # Chaves de join pessoas ↔ data_cep_uniq.csv
 CENSO_COL_SETOR = "B0000"
@@ -203,8 +206,7 @@ DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "300GB")
 
 ANO_REFERENCIA_CENSO = 2022
 IDADE_MAX = 120
-# PECP0030 cobre só o primeiro ano de vida.
-CENSO_IDADE_MESES_MAX = 11
+CENSO_IDADE_MAX = 140
 
 
 def cpf_norm_sql(col: str) -> str:
@@ -323,23 +325,9 @@ def idade_int_sql(col: str) -> str:
 
 
 def idade_censo_sql(alias: str = "p") -> str:
-    """Idade em anos completos no Censo.
-
-    As duas colunas se dividem a população em vez de uma cobrir a outra:
-    PECP0003 vale para 1 ano ou mais, PECP0030 para menores de 1 ano. Quem tem
-    meses preenchidos tem 0 ano completo — não é preciso dividir por 12.
-
-    O terceiro ramo é defensivo: PECP0003 = 0 está fora do documentado, mas se
-    aparecer significa a mesma coisa que o ramo dos meses e não custa aceitar.
-    """
-    anos = idade_int_sql(f'{alias}."{CENSO_COL_IDADE_ANOS}"')
-    meses = idade_int_sql(f'{alias}."{CENSO_COL_IDADE_MESES}"')
-    return f"""CASE
-        WHEN {anos} BETWEEN 1 AND {IDADE_MAX} THEN {anos}
-        WHEN {meses} BETWEEN 0 AND {CENSO_IDADE_MESES_MAX} THEN 0
-        WHEN {anos} = 0 THEN 0
-        ELSE NULL
-    END"""
+    """Idade em anos no Censo via PECP0401 (variável calculada, 0–140)."""
+    idade = idade_int_sql(f'{alias}."{CENSO_COL_IDADE_CALC}"')
+    return f"CASE WHEN {idade} BETWEEN 0 AND {CENSO_IDADE_MAX} THEN {idade} ELSE NULL END"
 
 
 def idade_cpf_sql(dob_expr: str, ano: int = ANO_REFERENCIA_CENSO) -> str:

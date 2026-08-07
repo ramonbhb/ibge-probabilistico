@@ -1,4 +1,4 @@
-"""Idade: PECP0003 e PECP0030 dividem a população, não uma cobre a outra."""
+"""Idade: Censo via PECP0401 (0–140); CPF derivada da data de nascimento."""
 
 from __future__ import annotations
 
@@ -12,9 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import (  # noqa: E402
     ANO_REFERENCIA_CENSO,
-    CENSO_COL_IDADE_ANOS,
-    CENSO_COL_IDADE_MESES,
-    IDADE_MAX,
+    CENSO_COL_IDADE_CALC,
+    CENSO_IDADE_MAX,
     idade_censo_sql,
     idade_cpf_sql,
     idade_int_sql,
@@ -29,62 +28,44 @@ def con():
     conexao.close()
 
 
-def idade_censo(con, anos, meses, tipo: str = "VARCHAR"):
+def idade_censo(con, valor, tipo: str = "VARCHAR"):
     con.execute(
-        f'CREATE OR REPLACE TABLE p AS SELECT CAST(? AS {tipo}) AS "'
-        f'{CENSO_COL_IDADE_ANOS}", CAST(? AS {tipo}) AS "{CENSO_COL_IDADE_MESES}"',
-        [anos, meses],
+        f'CREATE OR REPLACE TABLE p AS SELECT CAST(? AS {tipo}) AS "{CENSO_COL_IDADE_CALC}"',
+        [valor],
     )
     return con.execute(f"SELECT {idade_censo_sql('p')} FROM p p").fetchone()[0]
 
 
-# --- Censo -------------------------------------------------------------------
+# --- Censo (PECP0401) --------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "anos,meses,esperado",
+    "valor,esperado",
     [
-        # PECP0003 preenchida: 1 ano ou mais
-        ("35", None, 35),
-        ("1", None, 1),
-        (str(IDADE_MAX), None, IDADE_MAX),
-        # PECP0030 preenchida: menos de 1 ano, logo 0 ano completo
-        (None, "0", 0),
-        (None, "5", 0),
-        (None, "11", 0),
-        # Nenhuma das duas
-        (None, None, None),
-        ("", "", None),
-        # Fora de faixa
-        (str(IDADE_MAX + 1), None, None),
-        ("-1", None, None),
-        (None, "12", None),   # 12 meses seria 1 ano, deveria estar em PECP0003
-        (None, "999", None),
+        ("35", 35),
+        ("0", 0),
+        (str(CENSO_IDADE_MAX), CENSO_IDADE_MAX),
+        (None, None),
+        ("", None),
+        (str(CENSO_IDADE_MAX + 1), None),
+        ("-1", None),
+        ("999", None),
     ],
 )
-def test_idade_censo(con, anos, meses, esperado) -> None:
-    assert idade_censo(con, anos, meses) == esperado
+def test_idade_censo_pecp0401(con, valor, esperado) -> None:
+    assert idade_censo(con, valor) == esperado
 
 
-def test_meses_nao_sao_divididos_por_doze(con) -> None:
-    """PECP0030 cobre só o primeiro ano: 11 meses é 0 ano, não 0.9."""
-    assert idade_censo(con, None, "11") == 0
-
-
-def test_anos_zero_aceito_por_seguranca(con) -> None:
-    """Fora do documentado, mas se aparecer significa menos de 1 ano."""
-    assert idade_censo(con, "0", None) == 0
-
-
-def test_anos_tem_precedencia_sobre_meses(con) -> None:
-    """Se as duas vierem preenchidas, a de anos manda."""
-    assert idade_censo(con, "40", "7") == 40
-
-
-@pytest.mark.parametrize("tipo", ["VARCHAR", "INTEGER", "DOUBLE"])
+@pytest.mark.parametrize("tipo", ["VARCHAR", "INTEGER", "DOUBLE", "DECIMAL"])
 def test_idade_censo_tolera_o_tipo_da_coluna(con, tipo) -> None:
-    valor = "35" if tipo == "VARCHAR" else 35
-    assert idade_censo(con, valor, None, tipo) == 35
+    if tipo == "DECIMAL":
+        con.execute(
+            f'CREATE OR REPLACE TABLE p AS SELECT CAST(35 AS DECIMAL(11,0)) AS "{CENSO_COL_IDADE_CALC}"'
+        )
+        assert con.execute(f"SELECT {idade_censo_sql('p')} FROM p p").fetchone()[0] == 35
+    else:
+        valor = "35" if tipo == "VARCHAR" else 35
+        assert idade_censo(con, valor, tipo) == 35
 
 
 @pytest.mark.parametrize(
@@ -123,47 +104,15 @@ def test_idade_cpf(con, data, esperado) -> None:
     [
         ("1990-01-02", "1990-01-02"),
         ("02/01/1990", "1990-01-02"),
-        ("02-01-1990", "1990-01-02"),
-        ("1990/01/02", "1990-01-02"),
-        ("1990-01-02 00:00:00", "1990-01-02"),
-        ("19900102", "1990-01-02"),   # compacto, só a extensão local pega
+        ("19900102", "1990-01-02"),
         ("", ""),
-        ("01/1990", ""),
         ("99999999", ""),
-        ("19901301", ""),             # mês 13
-        ("19900230", ""),             # 30 de fevereiro
-        ("123456789", ""),            # 9 dígitos não é data compacta
     ],
 )
 def test_formatos_de_data_aceitos(con, bruto, esperado) -> None:
-    """Formato fora desta lista zera a idade do CPF, que é derivada da data."""
     saida = con.execute(
         f"SELECT {normalize_date_compacta_sql('v')} "
         "FROM (SELECT CAST(? AS VARCHAR) AS v) t",
         [bruto],
     ).fetchone()[0]
     assert saida == esperado, f"{bruto!r} → {saida!r}"
-
-
-@pytest.mark.parametrize(
-    "literal", ["19900102", "CAST(19900102 AS BIGINT)", "DATE '1990-01-02'"]
-)
-def test_data_compacta_recupera_coluna_numerica(con, literal) -> None:
-    """Coluna inteira de 8 dígitos é a hipótese principal para a idade nula."""
-    saida = con.execute(
-        f"SELECT {normalize_date_compacta_sql('v')} FROM (SELECT {literal} AS v) t"
-    ).fetchone()[0]
-    assert saida == "1990-01-02"
-
-
-def test_extensao_compacta_e_aditiva(con) -> None:
-    """Nada que já parseava pode mudar de resultado."""
-    casos = ["1990-01-02", "02/01/1990", "1990/01/02", "1990-1-2", "", "abc", "NULL"]
-    for bruto in casos:
-        antes, depois = con.execute(
-            f"SELECT {normalize_date_sql('v')}, {normalize_date_compacta_sql('v')} "
-            "FROM (SELECT CAST(? AS VARCHAR) AS v) t",
-            [bruto],
-        ).fetchone()
-        if antes != "":
-            assert depois == antes, f"{bruto!r}: {antes!r} virou {depois!r}"

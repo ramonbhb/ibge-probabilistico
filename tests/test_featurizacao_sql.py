@@ -13,13 +13,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from features import (  # noqa: E402
-    br_phonetic_basic_token,
-    br_phonetic_token,
-    full_name_norm,
+    clean_name,
+    clean_name_sql,
     full_name_phon_basic,
     full_name_phon_sv,
     name_feature_columns_sql,
-    normalize_text_sql,
     select_list_sql,
     split_name_three_parts,
 )
@@ -62,50 +60,65 @@ NOMES = [
 ]
 
 CHAVES = [
-    "nome_completo_norm",
+    "nome_completo",
     "nome_completo_phon",
     "primeiro_nome",
     "nome_meio",
     "ultimo_nome",
     "primeiro_nome_phon",
+    "nome_meio_phon",
     "ultimo_nome_phon",
     "nome_completo_phon_sv",
     "primeiro_nome_phon_sv",
+    "nome_meio_phon_sv",
     "ultimo_nome_phon_sv",
 ]
 
 
-def referencia_python(nome: str) -> dict[str, str]:
-    primeiro, meio, ultimo = split_name_three_parts(nome)
+def referencia_python(nome: str) -> dict[str, str | None]:
+    limpo = clean_name(nome)
+    primeiro, meio, ultimo = split_name_three_parts(limpo) if limpo else ("", "", "")
+    completo_phon = full_name_phon_basic(limpo) if limpo else ""
+    p_phon, m_phon, u_phon = (
+        split_name_three_parts(completo_phon) if completo_phon else ("", "", "")
+    )
+    completo_sv = full_name_phon_sv(limpo) if limpo else ""
+    p_sv, m_sv, u_sv = split_name_three_parts(completo_sv) if completo_sv else ("", "", "")
+
+    def nulo(v: str) -> str | None:
+        return v if v else None
+
     return {
-        "nome_completo_norm": full_name_norm(nome),
-        "nome_completo_phon": full_name_phon_basic(nome),
-        "primeiro_nome": primeiro,
-        "nome_meio": meio,
-        "ultimo_nome": ultimo,
-        "primeiro_nome_phon": br_phonetic_basic_token(primeiro) if primeiro else "",
-        "ultimo_nome_phon": br_phonetic_basic_token(ultimo) if ultimo else "",
-        "nome_completo_phon_sv": full_name_phon_sv(nome),
-        "primeiro_nome_phon_sv": (
-            br_phonetic_token(primeiro, strip_vowels=True) if primeiro else ""
-        ),
-        "ultimo_nome_phon_sv": (
-            br_phonetic_token(ultimo, strip_vowels=True) if ultimo else ""
-        ),
+        "nome_completo": limpo,
+        "nome_completo_phon": nulo(completo_phon),
+        "primeiro_nome": nulo(primeiro),
+        "nome_meio": nulo(meio),
+        "ultimo_nome": nulo(ultimo),
+        "primeiro_nome_phon": nulo(p_phon),
+        "nome_meio_phon": nulo(m_phon),
+        "ultimo_nome_phon": nulo(u_phon),
+        "nome_completo_phon_sv": nulo(completo_sv),
+        "primeiro_nome_phon_sv": nulo(p_sv),
+        "nome_meio_phon_sv": nulo(m_sv),
+        "ultimo_nome_phon_sv": nulo(u_sv),
     }
 
 
 @pytest.fixture(scope="module")
-def resultado_sql() -> dict[str, dict[str, str]]:
+def resultado_sql() -> dict[str, dict[str, str | None]]:
+    from features import PESSOA_COLUMNS
+
     con = duckdb.connect()
     con.execute("CREATE TABLE bruto (id INTEGER, nome VARCHAR)")
     con.executemany(
         "INSERT INTO bruto VALUES (?, ?)", list(enumerate(NOMES))
     )
-    cols = name_feature_columns_sql("nome_norm", strip_vowels=True)
+    cols = name_feature_columns_sql(
+        "nome_norm", strip_vowels=True, col_map=PESSOA_COLUMNS
+    )
     sql = f"""
     WITH norm AS (
-        SELECT id, {normalize_text_sql('nome')} AS nome_norm FROM bruto
+        SELECT id, {clean_name_sql('nome')} AS nome_norm FROM bruto
     )
     SELECT id, {select_list_sql(cols)} FROM norm ORDER BY id
     """
@@ -128,13 +141,34 @@ def test_paridade_sql_python(nome: str, resultado_sql) -> None:
         )
 
 
-def test_divergencia_conhecida_ligaturas() -> None:
-    """strip_accents do DuckDB não decompõe ligaduras; o NFKD do Python decompõe.
+@pytest.mark.parametrize(
+    "nome,esperado",
+    [
+        ("Jose DA silva", "JOSE SILVA"),
+        ("JOSE SILVA DA COSTA", "JOSE SILVA COSTA"),
+        ("MARIA DOS SANTOS", "MARIA SANTOS"),
+        ("DEISE SILVA", "DEISE SILVA"),
+        ("Desconhecido", None),
+        ("Maria Ignorada", "MARIA"),
+        ("Mãe", None),
+        ("JOSE MARIA HELENA SILVA", "JOSE MARIA HELENA SILVA"),
+    ],
+)
+def test_clean_name_particulas_e_placeholders(nome: str, esperado: str | None) -> None:
+    assert clean_name(nome) == esperado
 
-    Divergência aceita: ligaduras tipográficas não ocorrem em nome de registro
-    civil, e cobri-las custaria replaces extras em todas as linhas. Nos dois
-    casos o caractere não sobrevive como letra, então o efeito é local.
-    """
+
+def test_nome_meio_phon_composto() -> None:
+    ref = referencia_python("JOSE MARIA HELENA SILVA")
+    assert ref["nome_meio"] == "MARIA HELENA"
+    assert ref["nome_meio_phon"]
+    assert ref["nome_meio_phon"] in (ref["nome_completo_phon"] or "")
+
+
+def test_divergencia_conhecida_ligaturas() -> None:
+    """strip_accents do DuckDB não decompõe ligaduras; o NFKD do Python decompõe."""
+    from features import full_name_norm, normalize_text_sql
+
     literal = "'" + chr(0xFB01) + "LHO'"
     con = duckdb.connect()
     sql_out = con.execute(f"SELECT {normalize_text_sql(literal)}").fetchone()[0]
@@ -151,6 +185,7 @@ def test_nome_mae_renomeia_colunas() -> None:
     )
     assert set(cols) == set(NOME_MAE_COLUMNS.values())
     assert cols["nome_mae"] == "nome_mae_norm"
+    assert "nome_meio_mae_phon" in cols
 
 
 def test_sem_strip_vowels_omite_colunas_sv() -> None:
@@ -164,6 +199,8 @@ def test_sem_strip_vowels_omite_colunas_sv() -> None:
 )
 def test_benchmark_list_reduce() -> None:
     """Custo do dedupe por list_reduce numa amostra de alguns milhões de linhas."""
+    from features import normalize_text_sql
+
     n = int(os.environ.get("BENCH_SQL_N", 5_000_000))
     con = duckdb.connect()
     con.execute(
@@ -178,10 +215,9 @@ def test_benchmark_list_reduce() -> None:
         """
     )
     cols = name_feature_columns_sql("nome_norm", strip_vowels=True)
-    # Materializa: com um count(*) o DuckDB elimina a projeção inteira.
     sql = f"""
     CREATE TABLE saida AS
-    WITH norm AS (SELECT {normalize_text_sql('nome')} AS nome_norm FROM amostra)
+    WITH norm AS (SELECT {clean_name_sql('nome')} AS nome_norm FROM amostra)
     SELECT {select_list_sql(cols)} FROM norm
     """
     inicio = time.perf_counter()
