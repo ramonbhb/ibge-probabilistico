@@ -1,6 +1,6 @@
 # Linkage probabilístico — Censo × CPF
 
-Pipeline interativo (notebooks + DuckDB) para empilhar **bases bronze** CPF e Censo, rodar **Splink dedupe_only** cross-source e avaliar contra **ground truth** da coorte (`cohort_dedup`).
+Pipeline interativo (notebooks + DuckDB) para empilhar **bases bronze** CPF e Censo, rodar **Splink link_only** (Censo × CPF, sem pares intra-base) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
 
 Treino e validação são separados: o modelo é treinado sem ver a coorte (NB02) e só depois avaliado contra ela (NB03).
 
@@ -55,18 +55,18 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → inferência mãe → CEP → stack |
 | [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito anterior ao Censo, anula data inválida e valores-sentinela |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
-| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking pré-treino + treino + predict/clustering (sem coorte) |
+| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking + treino `link_only` Censo×CPF + predict/clustering (sem coorte) |
 | [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels da coorte (positivos + negativos difíceis) → precision/recall |
 
 **Pipeline:** `00` → `00b_limpar_dados` → `01_analise_descritiva` → `02_deduplicar_splink` → `03_validar_coorte`.
 
 Do NB00b em diante tudo consome `registro_limpo`, não `registro_unificado`. O `materialize_splink_input` resolve isso sozinho e avisa alto se cair na tabela suja.
 
-O NB03 depende dos artefatos do NB02 (`splink_model.json`, `splink_clusters.parquet`) e recarrega o modelo do JSON, sem reestimar nada.
+O NB03 depende dos artefatos do NB02 (`splink_model.json`, `splink_clusters.parquet`, `splink_predictions.parquet`) e recarrega o modelo do JSON, sem reestimar nada.
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
-**Blocking Splink:** regras definidas inline no NB02 (colunas completas, sem `substr`). Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino.
+**Blocking Splink:** regras fonéticas definidas inline no NB02 (`primeiro_nome_phon`, `ultimo_nome_phon`, `sexo`, `data_nascimento`, `cep`). Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
 
 Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência mãe didática).
 
@@ -137,6 +137,6 @@ Somente `cohort_dedup.parquet` — ouro + prata. Listas ouro **não** entram com
 A coorte é carregada apenas no NB03. Lá ela vira uma *labels table* do Splink com:
 
 - **positivos:** pares Censo ↔ CPF estritamente 1:1 na coorte e presentes no subset filtrado;
-- **negativos difíceis:** pares de indivíduos distintos da coorte que passam pelas mesmas blocking rules do modelo.
+- **negativos difíceis:** pares Censo × CPF de indivíduos distintos da coorte cujos atributos passam pelas mesmas blocking rules fonéticas do modelo (comparação direta Censo(A) vs CPF(B)).
 
 Sem os negativos explícitos o Splink trata todo par não rotulado como não-match, o que subestima a precision e infla a contagem de falsos positivos.
