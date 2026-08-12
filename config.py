@@ -539,6 +539,30 @@ def materialize_splink_input(
     return tabela
 
 
+def drop_splink_temp_tables(con: duckdb.DuckDBPyConnection) -> int:
+    """Remove tabelas/views `__splink__*` residuais do DuckDB persistente.
+
+    Rodadas anteriores (ou restart do kernel) deixam `__splink__df_representatives_*`
+    etc. no arquivo. O Splink tenta dropar essas tabelas no clustering/predict, mas
+    marca `created_by_splink=False` para o que não criou nesta sessão e levanta
+    ValueError. Limpar antes de criar o Linker evita o erro.
+    """
+    rows = con.execute(
+        """
+        SELECT table_name, table_type
+        FROM information_schema.tables
+        WHERE table_schema = 'main'
+          AND starts_with(table_name, '__splink__')
+        """
+    ).fetchall()
+    for name, table_type in rows:
+        kind = "VIEW" if table_type.upper() == "VIEW" else "TABLE"
+        con.execute(f'DROP {kind} IF EXISTS "{name}"')
+    if rows:
+        print(f"Removidas {len(rows)} tabelas/views residuais __splink__*")
+    return len(rows)
+
+
 def get_splink_db_api(con: duckdb.DuckDBPyConnection):
     """DuckDBAPI Splink reutilizando conexão configurada (threads, memory_limit)."""
     from splink import DuckDBAPI
