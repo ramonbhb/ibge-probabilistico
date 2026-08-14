@@ -19,7 +19,8 @@ Recorte geográfico e fonética mudam a cada rodada e ficam versionados, no bloc
 FILTRO_UF: str | int | None = None            # ex.: 42 (SC); None = nacional
 FILTRO_MUNICIPIO: str | int | None = 2111300  # IBGE 7 díg.; None = sem filtro
 USE_PHONETIC_STRIP_VOWELS = False             # True = colunas *_phon_sv (remove vogais)
-ANO_OBITO_CORTE = 2021                        # óbito antes disso sai da base (NB00b)
+ANO_OBITO_CORTE = 2023                        # ano_obito <= corte sai da base (NB00b)
+DATA_REFERENCIA_IDADE = "2022-08-01"           # idade CPF = anos completos nesta data
 ANO_NASCIMENTO_MIN = 1900                     # ano fora de [MIN, 2022] anula a data
 SEXO_VALIDOS = ("M", "F")                     # fora daqui o sexo vira NULL
 ```
@@ -53,7 +54,7 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | Notebook | Função |
 |----------|--------|
 | [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → inferência mãe → CEP → stack |
-| [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito anterior ao Censo, anula data inválida e valores-sentinela |
+| [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito ≤ corte e Censo sem nome; anula data inválida e sentinelas |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
 | [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking + treino `link_only` (1ª passada sem mãe) + predict/cluster 0,95 |
 | [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels Splink (positivos + negativos difíceis) → P/R, FP/FN a 0,95 |
@@ -69,7 +70,7 @@ O NB03 recarrega o modelo do JSON (labels, sem reestimar). O NB04 usa `splink_cl
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
-**Blocking Splink:** regras fonéticas definidas inline no NB02 (`primeiro_nome_phon`, `ultimo_nome_phon`, `sexo`, `data_nascimento`, `cep`). Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
+**Blocking Splink:** regras fonéticas definidas inline no NB02 (`primeiro_nome_phon`, `ultimo_nome_phon`, `sexo`, `data_nascimento`, `cep`). O CEP entra só no blocking OR (lugar-no-tempo); não entra no scoring nem no EM. Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
 
 Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência mãe didática).
 
@@ -78,15 +79,15 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 - Nome: completo, primeiro/meio/último (partículas `DA`, `DOS`, etc. e placeholders `DESCONHECIDO`, `MAE` removidos por [`clean_name_sql`](features.py); vazio → `NULL`)
 - **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py)). Sofre o mesmo split da pessoa: `primeiro_nome_mae`, `nome_meio_mae`, `ultimo_nome_mae`, com as fonéticas correspondentes. Vazio vira `NULL` (`NULLIF`), para o Splink não casar `'' = ''`
 - **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
-- Sexo, DOB, **idade** (anos na referência do Censo 2022), CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
+- Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
-- **`idade`:** anos completos na referência do Censo ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo
+- **`idade`:** Censo via `PECP0401`; CPF = anos completos em `DATA_REFERENCIA_IDADE` ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo
 - Fonética **básica** sempre: `*_phon` (substituições PT-BR)
 - Fonética **agressiva** opcional: `*_phon_sv` (`USE_PHONETIC_STRIP_VOWELS=True`)
 
 ### Idade
 
-No Censo a idade vem de **`PECP0401`** (variável auxiliar calculada, 0–140 anos, universo). No CPF é derivada de `data_nascimento`. As colunas do questionário (`PECP0003`/`PECP0030`) ficam só no diagnóstico do NB00.
+No Censo a idade vem de **`PECP0401`** (variável auxiliar calculada, 0–140 anos, universo). No CPF é derivada de `data_nascimento` como anos completos em **`DATA_REFERENCIA_IDADE`** (`2022-08-01`), via `age()` no DuckDB — não é só `2022 - ano`. As colunas do questionário (`PECP0003`/`PECP0030`) ficam só no diagnóstico do NB00.
 
 Se a idade vier muito nula, a célula **3b do NB00** aponta a causa: tipos das colunas, contagem de nulos de cada lado e os valores crus mais frequentes. Dois casos conhecidos que zeram a idade do CPF inteiro:
 
@@ -110,17 +111,17 @@ Duas traduções não são literais, porque o RE2 do DuckDB não tem lookahead n
 
 Duas classes de problema, um passe só sobre `registro_unificado`.
 
-**Linha que não pode casar.** Quem morreu antes do Censo 2022 não foi enumerado, então nenhum par Censo × CPF com esse registro é verdadeiro. O corte é `ANO_OBITO_CORTE` sobre `ano_obito`, que vem de `CPF_COL_ANO_OBITO` no bronze. O NB00 falha se a coluna não estiver no bronze, em vez de preencher `NULL` e desligar o filtro em silêncio. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam — o corte só tem limite inferior, para nunca descartar por ruído de digitação.
+**Linha que não pode casar.** CPF com `ano_obito <= ANO_OBITO_CORTE` (hoje 2023) sai da base. Registros do Censo sem `nome_completo` (imputação) também saem (`censo_sem_nome_sql`). O `ano_obito` vem de `CPF_COL_ANO_OBITO` no bronze; o NB00 falha se a coluna não estiver lá. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam.
 
 **Valor-sentinela que o SQL lê como igualdade.** É o problema mais caro dos dois. `l.cep = r.cep` trata `'' = ''` e `'00000000' = '00000000'` como acordo real, então ausência vira par candidato; nas `deterministic_rules` do NB02 vira até match determinístico, contaminando a estimativa do prior. As três colunas afetadas nascem assim: `normalize_date_sql` devolve `''` quando a data não parseia, `cep_norm_sql` faz `lpad(..., 8, '0')` e transforma CEP ausente do CPF em `'00000000'` (o Censo usa `''` para o mesmo caso), e nome que não normaliza vira `''` — inclusive `primeiro_nome` e `ultimo_nome`, que estão na blocking rule principal. Todos viram `NULL`, que não casa com `NULL`.
 
-Data de nascimento inválida é a que não é data real (`2022-02-30` passa pelo `normalize_date_sql` quando já vem em ISO) ou tem ano fora de `[ANO_NASCIMENTO_MIN, ANO_REFERENCIA_CENSO]`. Quando a data do CPF cai, a `idade` cai junto, porque é derivada dela; a do Censo vem de `PECP0401` e não é tocada.
+Data de nascimento inválida é a que não é data real (`2022-02-30` passa pelo `normalize_date_sql` quando já vem em ISO) ou tem ano fora de `[ANO_NASCIMENTO_MIN, ANO_REFERENCIA_CENSO]`. No NB00b a `idade` do CPF é **recalculada** com `idade_cpf_sql` sobre a DOB validada; se a data cai, a idade cai. A do Censo vem de `PECP0401` e não é tocada.
 
 **Categoria residual de sexo.** O `normalize_sexo_sql` mapeia M/F e devolve a inicial de qualquer outra coisa: `'O'` de outro, `'I'` de ignorado, `'9'` de não informado. Para o `ExactMatch('sexo')` do NB02 dois resíduos iguais seriam concordância, e "ambos com sexo desconhecido" não é evidência de serem a mesma pessoa. Só `SEXO_VALIDOS` sobrevive. O NB00b imprime a distribuição completa com uma coluna `mantido` antes de aplicar a regra: se a base tiver uma terceira categoria real e com volume, anulá-la joga sinal fora e vale rever a constante.
 
 O notebook separa **reencodado** (`''` que já era ausência e só mudou de grafia) de **descartado** (valor que existia e foi julgado inválido). O segundo número é o que merece revisão. Há também uma checagem de impacto na coorte: se o filtro de óbito remove ground truth, alguma das duas fontes está errada.
 
-Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `dob_valida_sql`, `cep_valido_sql`, `limpeza_columns_sql`), cobertas por [`tests/test_limpeza.py`](tests/test_limpeza.py).
+Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `censo_sem_nome_sql`, `dob_valida_sql`, `cep_valido_sql`, `limpeza_columns_sql`), cobertas por [`tests/test_limpeza.py`](tests/test_limpeza.py).
 
 ## Saídas
 

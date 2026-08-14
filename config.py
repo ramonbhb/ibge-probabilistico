@@ -57,11 +57,10 @@ USE_PHONETIC_STRIP_VOWELS = False
 
 # --- Limpeza (NB00b) ---------------------------------------------------------
 
-# Remove do CPF quem morreu antes do Censo. Conservador de propósito: a data de
-# referência do Censo 2022 é 31/07/2022, então mortes em 2021 também não seriam
-# enumeradas, mas manter 2021 evita descartar registro por erro de digitação no
-# ano. Quem tem ano de óbito nulo (vivo) e o Censo inteiro nunca são afetados.
-ANO_OBITO_CORTE = 2021
+# Remove do CPF quem tem ano_obito <= corte (inclusive). Quem tem ano nulo
+# (vivo) e o Censo inteiro nunca são afetados. Anos absurdos no futuro (9999)
+# ficam: só o intervalo (0, corte] é motivo de exclusão.
+ANO_OBITO_CORTE = 2023
 
 # Faixa aceita para o ano de nascimento; fora dela a data vira NULL.
 ANO_NASCIMENTO_MIN = 1900
@@ -207,6 +206,8 @@ DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "20"))
 DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "300GB")
 
 ANO_REFERENCIA_CENSO = 2022
+# Data de referência para idade do CPF (anos completos).
+DATA_REFERENCIA_IDADE = "2022-08-01"
 IDADE_MAX = 120
 CENSO_IDADE_MAX = 140
 
@@ -332,13 +333,18 @@ def idade_censo_sql(alias: str = "p") -> str:
     return f"CASE WHEN {idade} BETWEEN 0 AND {CENSO_IDADE_MAX} THEN {idade} ELSE NULL END"
 
 
-def idade_cpf_sql(dob_expr: str, ano: int = ANO_REFERENCIA_CENSO) -> str:
-    """Idade em anos na referência do Censo (usa só o ano da data de nascimento)."""
-    ano_nasc = f"TRY_CAST(substr(CAST({dob_expr} AS VARCHAR), 1, 4) AS INTEGER)"
+def idade_cpf_sql(
+    dob_expr: str, data_ref: str = DATA_REFERENCIA_IDADE
+) -> str:
+    """Idade em anos completos na data de referência (DATA_REFERENCIA_IDADE)."""
+    ano_ref = int(str(data_ref)[:4])
+    dob_date = f"TRY_CAST({dob_expr} AS DATE)"
+    ano_nasc = f"EXTRACT(YEAR FROM {dob_date})"
     return f"""CASE
         WHEN {dob_expr} IS NULL OR TRIM(CAST({dob_expr} AS VARCHAR)) = '' THEN NULL
-        WHEN {ano_nasc} BETWEEN {ANO_NASCIMENTO_MIN} AND {ano}
-        THEN {ano} - {ano_nasc}
+        WHEN {dob_date} IS NULL THEN NULL
+        WHEN {ano_nasc} BETWEEN {ANO_NASCIMENTO_MIN} AND {ano_ref}
+        THEN CAST(EXTRACT(YEAR FROM age(DATE '{data_ref}', {dob_date})) AS INTEGER)
         ELSE NULL
     END"""
 
@@ -365,14 +371,25 @@ COLUNAS_ESTRUTURAIS = frozenset(
 def obito_antes_do_censo_sql(
     col: str = "ano_obito", corte: int = ANO_OBITO_CORTE
 ) -> str:
-    """True só para óbito comprovadamente anterior ao Censo.
+    """True quando ano_obito está em (0, corte] — remove o registro.
 
     Ano nulo (vivo, e todo o Censo) e ano zero (sentinela) são False, então a
-    linha fica. Anos absurdos no futuro (9999) também ficam: o corte é só o
-    limite inferior, para nunca descartar por ruído.
+    linha fica. Anos absurdo no futuro (9999) também ficam.
     """
     ano = f"TRY_CAST({col} AS INTEGER)"
-    return f"({ano} IS NOT NULL AND {ano} > 0 AND {ano} < {corte})"
+    return f"({ano} IS NOT NULL AND {ano} > 0 AND {ano} <= {corte})"
+
+
+def censo_sem_nome_sql(
+    origem_col: str = "origem",
+    nome_col: str = "nome_completo",
+) -> str:
+    """True para linha do Censo com nome nulo/vazio (imputação)."""
+    nome = texto_nao_vazio_sql(nome_col)
+    return (
+        f"(LOWER(TRIM(CAST({origem_col} AS VARCHAR))) = 'censo' "
+        f"AND {nome} IS NULL)"
+    )
 
 
 def dob_valida_sql(
@@ -433,12 +450,12 @@ def limpeza_columns_sql(colunas: dict[str, str]) -> dict[str, str]:
         else:
             out[nome] = texto_nao_vazio_sql(nome)
 
-    # A idade do CPF é derivada da data de nascimento: se a data cai, a idade
-    # não pode sobreviver. No Censo a idade vem de PECP0003, independente.
+    # Idade do CPF: recalcula anos completos em DATA_REFERENCIA_IDADE a partir
+    # da DOB já validada. Se a data cai, a idade cai. Censo mantém PECP0401.
     if "idade" in out and "data_nascimento" in colunas:
+        dob = dob_valida_sql("data_nascimento")
         out["idade"] = (
-            f"CASE WHEN origem = 'cpf' AND {dob_valida_sql()} IS NULL "
-            f"THEN NULL ELSE idade END"
+            f"CASE WHEN origem = 'cpf' THEN {idade_cpf_sql(dob)} ELSE idade END"
         )
     return out
 

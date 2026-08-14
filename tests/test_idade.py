@@ -14,6 +14,7 @@ from config import (  # noqa: E402
     ANO_REFERENCIA_CENSO,
     CENSO_COL_IDADE_CALC,
     CENSO_IDADE_MAX,
+    DATA_REFERENCIA_IDADE,
     idade_censo_sql,
     idade_cpf_sql,
     idade_int_sql,
@@ -84,8 +85,11 @@ def test_cast_tolerante(con, valor, esperado) -> None:
 @pytest.mark.parametrize(
     "data,esperado",
     [
-        ("1990-01-02", ANO_REFERENCIA_CENSO - 1990),
+        # DATA_REFERENCIA_IDADE = 2022-08-01 → anos completos
+        ("1990-01-02", 32),   # aniversário antes da ref
+        ("1990-09-01", 31),   # aniversário depois da ref
         ("2022-06-01", 0),
+        ("2022-08-01", 0),
         ("", None),
         (None, None),
         ("1850-01-01", None),
@@ -93,6 +97,7 @@ def test_cast_tolerante(con, valor, esperado) -> None:
     ],
 )
 def test_idade_cpf(con, data, esperado) -> None:
+    assert DATA_REFERENCIA_IDADE == "2022-08-01"
     dob = normalize_date_sql("v")
     assert con.execute(
         f"SELECT {idade_cpf_sql(dob)} FROM (SELECT CAST(? AS VARCHAR) AS v) t", [data]

@@ -15,6 +15,7 @@ from config import (  # noqa: E402
     ANO_OBITO_CORTE,
     ANO_REFERENCIA_CENSO,
     SEXO_VALIDOS,
+    censo_sem_nome_sql,
     cep_valido_sql,
     dob_valida_sql,
     limpeza_columns_sql,
@@ -48,8 +49,8 @@ def escalar(con, expr: str, valor, tipo: str = "VARCHAR"):
         (-1, False),
         (1990, True),
         (ANO_OBITO_CORTE - 1, True),
-        (ANO_OBITO_CORTE, False),       # o corte em si fica
-        (ANO_REFERENCIA_CENSO, False),
+        (ANO_OBITO_CORTE, True),        # o corte inclusive sai
+        (ANO_OBITO_CORTE + 1, False),
         (9999, False),          # absurdo no futuro não é motivo para descartar
     ],
 )
@@ -60,13 +61,34 @@ def test_filtro_obito(con, ano, removido) -> None:
 def test_filtro_obito_nao_derruba_linha_por_null(con) -> None:
     """NOT (expr) precisa manter a linha quando o ano é NULL, sem propagar NULL."""
     con.execute(
-        "CREATE TABLE t AS SELECT * FROM (VALUES (1, NULL), (2, 1990), (3, 2022)) "
+        "CREATE TABLE t AS SELECT * FROM (VALUES (1, NULL), (2, 1990), (3, 2024)) "
         "v(id, ano_obito)"
     )
     ids = con.execute(
         f"SELECT id FROM t WHERE NOT {obito_antes_do_censo_sql()} ORDER BY id"
     ).fetchall()
     assert [i[0] for i in ids] == [1, 3]
+
+
+@pytest.mark.parametrize(
+    "origem,nome,removido",
+    [
+        ("censo", None, True),
+        ("censo", "", True),
+        ("censo", "   ", True),
+        ("censo", "JOAO SILVA", False),
+        ("cpf", None, False),
+        ("cpf", "", False),
+        ("CPF", "JOAO", False),
+    ],
+)
+def test_censo_sem_nome(con, origem, nome, removido) -> None:
+    con.execute(
+        "CREATE OR REPLACE TABLE t AS SELECT CAST(? AS VARCHAR) AS origem, "
+        "CAST(? AS VARCHAR) AS nome_completo",
+        [origem, nome],
+    )
+    assert con.execute(f"SELECT {censo_sem_nome_sql()} FROM t").fetchone()[0] is removido
 
 
 # --- Data de nascimento ------------------------------------------------------
