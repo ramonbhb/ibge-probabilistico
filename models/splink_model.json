@@ -1,0 +1,454 @@
+{
+    "link_type": "link_only",
+    "probability_two_random_records_match": 4.5007729039743456e-07,
+    "retain_matching_columns": true,
+    "retain_intermediate_calculation_columns": true,
+    "additional_columns_to_retain": [],
+    "sql_dialect": "duckdb",
+    "linker_uid": "idlmji4e",
+    "em_convergence": 0.0001,
+    "max_iterations": 25,
+    "bayes_factor_column_prefix": "bf_",
+    "term_frequency_adjustment_column_prefix": "tf_",
+    "comparison_vector_value_column_prefix": "gamma_",
+    "unique_id_column_name": "unique_id",
+    "source_dataset_column_name": "source_dataset",
+    "blocking_rules_to_generate_predictions": [
+        {
+            "blocking_rule": "(l.\"primeiro_nome_phon\" = r.\"primeiro_nome_phon\") AND (l.\"ultimo_nome_phon\" = r.\"ultimo_nome_phon\") AND (l.\"sexo\" = r.\"sexo\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"ultimo_nome_phon\" = r.\"ultimo_nome_phon\") AND (l.\"data_nascimento\" = r.\"data_nascimento\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"primeiro_nome_phon\" = r.\"primeiro_nome_phon\") AND (l.\"data_nascimento\" = r.\"data_nascimento\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"cep\" = r.\"cep\") AND (l.\"ultimo_nome_phon\" = r.\"ultimo_nome_phon\") AND (l.\"sexo\" = r.\"sexo\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"cep\" = r.\"cep\") AND (l.\"primeiro_nome_phon\" = r.\"primeiro_nome_phon\") AND (l.\"sexo\" = r.\"sexo\")",
+            "sql_dialect": "duckdb"
+        }
+    ],
+    "comparisons": [
+        {
+            "output_column_name": "nome_completo_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_completo_phon_l\" IS NULL OR \"nome_completo_phon_r\" IS NULL",
+                    "label_for_charts": "nome_completo_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"nome_completo_phon_l\" = \"nome_completo_phon_r\"",
+                    "label_for_charts": "Exact match on nome_completo_phon",
+                    "m_probability": 0.20523575636855432,
+                    "u_probability": 8.720690033319576e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_completo_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(\"nome_completo_phon_l\", \"nome_completo_phon_r\") >= 0.95",
+                    "label_for_charts": "Jaro-Winkler distance of nome_completo_phon >= 0.95",
+                    "m_probability": 0.016822720519081343,
+                    "u_probability": 3.0522415116618517e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.7779415231123643,
+                    "u_probability": 0.999996075689485,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "NameComparison"
+        },
+        {
+            "output_column_name": "primeiro_nome_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"primeiro_nome_phon_l\" IS NULL OR \"primeiro_nome_phon_r\" IS NULL",
+                    "label_for_charts": "primeiro_nome_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"primeiro_nome_phon_l\" = \"primeiro_nome_phon_r\"",
+                    "label_for_charts": "Exact match on primeiro_nome_phon",
+                    "m_probability": 0.5173411631599464,
+                    "u_probability": 0.008970755820025015,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "primeiro_nome_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.9653176736801072,
+                    "u_probability": 0.991029244179975,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "nome_meio_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_meio_phon_l\" IS NULL OR \"nome_meio_phon_r\" IS NULL",
+                    "label_for_charts": "nome_meio_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"nome_meio_phon_l\" = \"nome_meio_phon_r\"",
+                    "label_for_charts": "Exact match on nome_meio_phon",
+                    "m_probability": 0.2193022432063511,
+                    "u_probability": 0.004017114204925058,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_meio_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.7806977567936488,
+                    "u_probability": 0.995982885795075,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "ultimo_nome_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"ultimo_nome_phon_l\" IS NULL OR \"ultimo_nome_phon_r\" IS NULL",
+                    "label_for_charts": "ultimo_nome_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"ultimo_nome_phon_l\" = \"ultimo_nome_phon_r\"",
+                    "label_for_charts": "Exact match on ultimo_nome_phon",
+                    "m_probability": 0.5226871581260909,
+                    "u_probability": 0.023327636902293166,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "ultimo_nome_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.9546256837478182,
+                    "u_probability": 0.9766723630977069,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "nome_mae_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_mae_phon_l\" IS NULL OR \"nome_mae_phon_r\" IS NULL",
+                    "label_for_charts": "nome_mae_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"nome_mae_phon_l\" = \"nome_mae_phon_r\"",
+                    "label_for_charts": "Exact match on nome_mae_phon",
+                    "m_probability": 0.1969266703985174,
+                    "u_probability": 5.462466030289374e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_mae_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(\"nome_mae_phon_l\", \"nome_mae_phon_r\") >= 0.95",
+                    "label_for_charts": "Jaro-Winkler distance of nome_mae_phon >= 0.95",
+                    "m_probability": 0.04518945888049413,
+                    "u_probability": 1.4826693510785444e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.7578838707209884,
+                    "u_probability": 0.9999797108404589,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "NameComparison"
+        },
+        {
+            "output_column_name": "primeiro_nome_mae_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"primeiro_nome_mae_phon_l\" IS NULL OR \"primeiro_nome_mae_phon_r\" IS NULL",
+                    "label_for_charts": "primeiro_nome_mae_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"primeiro_nome_mae_phon_l\" = \"primeiro_nome_mae_phon_r\"",
+                    "label_for_charts": "Exact match on primeiro_nome_mae_phon",
+                    "m_probability": 0.3335806194967684,
+                    "u_probability": 0.04111325057697297,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "primeiro_nome_mae_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.6664193805032316,
+                    "u_probability": 0.958886749423027,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "nome_meio_mae_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_meio_mae_phon_l\" IS NULL OR \"nome_meio_mae_phon_r\" IS NULL",
+                    "label_for_charts": "nome_meio_mae_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"nome_meio_mae_phon_l\" = \"nome_meio_mae_phon_r\"",
+                    "label_for_charts": "Exact match on nome_meio_mae_phon",
+                    "m_probability": 0.2600024169272558,
+                    "u_probability": 0.0051358297123359434,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_meio_mae_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.7399975830727443,
+                    "u_probability": 0.994864170287664,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "ultimo_nome_mae_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"ultimo_nome_mae_phon_l\" IS NULL OR \"ultimo_nome_mae_phon_r\" IS NULL",
+                    "label_for_charts": "ultimo_nome_mae_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"ultimo_nome_mae_phon_l\" = \"ultimo_nome_mae_phon_r\"",
+                    "label_for_charts": "Exact match on ultimo_nome_mae_phon",
+                    "m_probability": 0.3163565967757886,
+                    "u_probability": 0.024839956199774738,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "ultimo_nome_mae_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.6836434032242114,
+                    "u_probability": 0.9751600438002253,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "data_nascimento",
+            "comparison_levels": [
+                {
+                    "sql_condition": "try_strptime(\"data_nascimento_l\", '%Y-%m-%d') IS NULL OR try_strptime(\"data_nascimento_r\", '%Y-%m-%d') IS NULL",
+                    "label_for_charts": "transformed data_nascimento is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"data_nascimento_l\" = \"data_nascimento_r\"",
+                    "label_for_charts": "Exact match on date of birth",
+                    "m_probability": 0.45403413649134255,
+                    "u_probability": 3.961533885669879e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"data_nascimento_l\", \"data_nascimento_r\") <= 1",
+                    "label_for_charts": "DamerauLevenshtein distance <= 1",
+                    "m_probability": 0.03753440248127127,
+                    "u_probability": 0.0010822708069125602,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ABS(EPOCH(try_strptime(\"data_nascimento_l\", '%Y-%m-%d')) - EPOCH(try_strptime(\"data_nascimento_r\", '%Y-%m-%d'))) <= 2629800.0",
+                    "label_for_charts": "Abs date difference <= 1 month",
+                    "m_probability": 0.004200715789504001,
+                    "u_probability": 0.001665742730648603,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ABS(EPOCH(try_strptime(\"data_nascimento_l\", '%Y-%m-%d')) - EPOCH(try_strptime(\"data_nascimento_r\", '%Y-%m-%d'))) <= 31557600.0",
+                    "label_for_charts": "Abs date difference <= 1 year",
+                    "m_probability": 0.018304380559704982,
+                    "u_probability": 0.022885642034279292,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ABS(EPOCH(try_strptime(\"data_nascimento_l\", '%Y-%m-%d')) - EPOCH(try_strptime(\"data_nascimento_r\", '%Y-%m-%d'))) <= 31557600.0",
+                    "label_for_charts": "Abs date difference <= 1 year",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.4859263646781771,
+                    "u_probability": 0.9743267290893028,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "DateOfBirthComparison"
+        },
+        {
+            "output_column_name": "idade",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"idade_l\" IS NULL OR \"idade_r\" IS NULL",
+                    "label_for_charts": "idade is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"idade_l\" = \"idade_r\"",
+                    "label_for_charts": "Exact match on idade",
+                    "m_probability": 0.5764009640332881,
+                    "u_probability": 0.012661922259394356,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.4235990359667119,
+                    "u_probability": 0.9873380777406057,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "sexo",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"sexo_l\" IS NULL OR \"sexo_r\" IS NULL",
+                    "label_for_charts": "sexo is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"sexo_l\" = \"sexo_r\"",
+                    "label_for_charts": "Exact match on sexo",
+                    "m_probability": 0.7519491040305123,
+                    "u_probability": 0.5008523408464213,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "sexo",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.24805089596948768,
+                    "u_probability": 0.4991476591535787,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        },
+        {
+            "output_column_name": "cep",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"cep_l\" IS NULL OR \"cep_r\" IS NULL",
+                    "label_for_charts": "cep is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"cep_l\" = \"cep_r\"",
+                    "label_for_charts": "Exact match on cep",
+                    "m_probability": 0.007501812315878633,
+                    "u_probability": 0.00043916297472206635,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "cep",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.9924981876841213,
+                    "u_probability": 0.999560837025278,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "ExactMatch"
+        }
+    ]
+}
