@@ -2,7 +2,7 @@
 
 Pipeline interativo (notebooks + DuckDB) para empilhar **bases bronze** CPF e Censo, rodar **Splink link_only** (Censo × CPF, sem pares intra-base) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
 
-Treino e validação são separados: o modelo é treinado sem ver a coorte (NB02) e só depois avaliado contra ela (NB03).
+Treino e validação são separados: o modelo é treinado sem ver a coorte (NB02). Labels Splink (qualidade do scoring) no NB03; funil da lista ouro (Censo → CPF) no NB04. Avaliação usa **threshold / clusters 0,95**.
 
 ## Pré-requisitos
 
@@ -55,14 +55,17 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → inferência mãe → CEP → stack |
 | [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito anterior ao Censo, anula data inválida e valores-sentinela |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
-| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking + treino `link_only` Censo×CPF + predict/clustering (sem coorte) |
-| [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels da coorte (positivos + negativos difíceis) → precision/recall |
+| [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking + treino `link_only` (1ª passada sem mãe) + predict/cluster 0,95 |
+| [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels Splink (positivos + negativos difíceis) → P/R, FP/FN a 0,95 |
+| [`04_validar_lista_ouro.ipynb`](notebooks/04_validar_lista_ouro.ipynb) | Funil Censo → CPF ouro nos clusters 0,95 (`recall_ouro`) |
 
-**Pipeline:** `00` → `00b_limpar_dados` → `01_analise_descritiva` → `02_deduplicar_splink` → `03_validar_coorte`.
+**Pipeline:** `00` → `00b` → `01` → `02` → `03` (labels) → `04` (ouro).
 
 Do NB00b em diante tudo consome `registro_limpo`, não `registro_unificado`. O `materialize_splink_input` resolve isso sozinho e avisa alto se cair na tabela suja.
 
-O NB03 depende dos artefatos do NB02 (`splink_model.json`, `splink_clusters.parquet`, `splink_predictions.parquet`) e recarrega o modelo do JSON, sem reestimar nada.
+O NB03 recarrega o modelo do JSON (labels, sem reestimar). O NB04 usa `splink_clusters.parquet`. `predict()` no NB02 pode gerar pares ≥0,5; **métricas de validação usam 0,95 / clusters**.
+
+**1ª passada do modelo (NB02):** sem `nome_mae*` (Censo ~29% preenchido; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,98. DOB: `DateOfBirthComparison` com faixas de 1 mês e 1 ano (sem 10 anos). Mãe fica para uma 2ª passada. Cópia do JSON em [`models/splink_model.json`](models/splink_model.json).
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
@@ -128,15 +131,15 @@ Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `dob_valida_sql`
 | `probabilistico.duckdb`, `registro_unificado.parquet` | NB00 |
 | `registro_limpo.parquet` | NB00b |
 | `splink_model.json`, `splink_predictions.parquet`, `splink_clusters.parquet`, `dashboards/cluster_studio.html` | NB02 |
-| `metricas_cohort.csv` | NB03 |
+| `models/splink_model.json` | cópia versionada do modelo |
+| `metricas_cohort.csv` | NB03 (labels) |
+| `metricas_ouro.csv` | NB04 (funil ouro) |
 
 ## Ground truth
 
 Somente `cohort_dedup.parquet` — ouro + prata. Listas ouro **não** entram como dado de entrada.
 
-A coorte é carregada apenas no NB03. Lá ela vira uma *labels table* do Splink com:
+A coorte entra só na validação:
 
-- **positivos:** pares Censo ↔ CPF estritamente 1:1 na coorte e presentes no subset filtrado;
-- **negativos difíceis:** pares Censo × CPF de indivíduos distintos da coorte cujos atributos passam pelas mesmas blocking rules fonéticas do modelo (comparação direta Censo(A) vs CPF(B)).
-
-Sem os negativos explícitos o Splink trata todo par não rotulado como não-match, o que subestima a precision e infla a contagem de falsos positivos.
+- **NB03 — labels:** positivos 1:1 no subset + negativos difíceis (Censo(A) vs CPF(B) nas blocking rules). Sem negativos explícitos o Splink trata par não rotulado como não-match e a precision cai.
+- **NB04 — ouro:** cada Censo A deve receber o CPF X. `recall_ouro` = fração dos A's avaliáveis cujo cluster (0,95) contém X. O funil também reporta quantos Censos do subset foram linkados a algum CPF.

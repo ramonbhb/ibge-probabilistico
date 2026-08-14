@@ -149,11 +149,13 @@ DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 REGISTRO_UNIFICADO = OUTPUT_DIR / "registro_unificado.parquet"
 REGISTRO_LIMPO = OUTPUT_DIR / "registro_limpo.parquet"
 
-# Artefatos do treino (NB02), consumidos pela validação (NB03)
+# Artefatos do treino (NB02), consumidos pela validação (NB03 labels, NB04 ouro)
 SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
 SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
 SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
 METRICAS_COHORT = OUTPUT_DIR / "metricas_cohort.csv"
+METRICAS_OURO = OUTPUT_DIR / "metricas_ouro.csv"
+MODELS_DIR = PROB_DIR / "models"
 
 CPF_NORM_SQL = "lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 11, '0')"
 
