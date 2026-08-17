@@ -558,6 +558,59 @@ def materialize_splink_input(
     return tabela
 
 
+def materialize_gt_no_subset(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cohort_parquet: Path | None = None,
+    splink_view: str = SPLINK_INPUT_VIEW,
+    cohort_table: str = "cohort_dedup_raw",
+    pairs_table: str = "ground_truth_pairs",
+    subset_table: str = "gt_no_subset",
+) -> dict[str, int]:
+    """Pares ouro 1:1 com os dois lados em `splink_view`.
+
+    Cria `ground_truth_pairs` (1:1 nacional) e `gt_no_subset` (ambos no recorte).
+    Não calcula métricas — só materializa a amostra rotulável.
+    """
+    if cohort_parquet is not None:
+        con.execute(f"""
+        CREATE OR REPLACE TABLE {cohort_table} AS
+        SELECT * FROM read_parquet('{cohort_parquet}')
+        """)
+    cpf_gt = cpf_norm_sql("CPF_NORM")
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {pairs_table} AS
+    SELECT
+        'censo_' || person_id_censo AS unique_id_censo,
+        'cpf_' || cpf_norm AS unique_id_cpf,
+        person_id_censo,
+        cpf_norm
+    FROM (
+        SELECT *,
+            COUNT(*) OVER (PARTITION BY person_id_censo) AS n_cpf_por_censo,
+            COUNT(*) OVER (PARTITION BY cpf_norm) AS n_censo_por_cpf
+        FROM (
+            SELECT DISTINCT
+                CAST(PERSON_ID_CENSO AS VARCHAR) AS person_id_censo,
+                {cpf_gt} AS cpf_norm
+            FROM {cohort_table}
+            WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
+        )
+    )
+    WHERE n_cpf_por_censo = 1 AND n_censo_por_cpf = 1
+    """)
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {subset_table} AS
+    SELECT gt.*
+    FROM {pairs_table} gt
+    JOIN {splink_view} c ON c.unique_id = gt.unique_id_censo
+    JOIN {splink_view} p ON p.unique_id = gt.unique_id_cpf
+    """)
+    n_1a1 = con.execute(f"SELECT COUNT(*) FROM {pairs_table}").fetchone()[0]
+    n_subset = con.execute(f"SELECT COUNT(*) FROM {subset_table}").fetchone()[0]
+    return {"n_pares_1a1_nacional": int(n_1a1), "n_gt_no_subset": int(n_subset)}
+
+
 def drop_splink_temp_tables(con: duckdb.DuckDBPyConnection) -> int:
     """Remove tabelas/views `__splink__*` residuais do DuckDB persistente.
 

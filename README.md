@@ -57,7 +57,7 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito ≤ corte e Censo sem nome; anula data inválida e sentinelas |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
 | [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking + treino `link_only` (1ª passada sem mãe) + predict/cluster 0,95 |
-| [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels Splink (positivos + negativos difíceis) → P/R, FP/FN a 0,95 |
+| [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels Splink (matches conhecidos + pares distintos) → P/R, FP/FN a 0,95 |
 | [`04_validar_lista_ouro.ipynb`](notebooks/04_validar_lista_ouro.ipynb) | Funil Censo → CPF ouro nos clusters 0,95 (`recall_ouro`) |
 
 **Pipeline:** `00` → `00b` → `01` → `02` → `03` (labels) → `04` (ouro).
@@ -142,5 +142,5 @@ Somente `cohort_dedup.parquet` — ouro + prata. Listas ouro **não** entram com
 
 A coorte entra só na validação:
 
-- **NB03 — labels:** positivos 1:1 no subset + negativos difíceis (Censo(A) vs CPF(B) nas blocking rules). Sem negativos explícitos o Splink trata par não rotulado como não-match e a precision cai.
+- **NB03 — labels:** amostra de verdade conhecida. `clerical_match_score = 1` = match ouro 1:1 no subset; `= 0` = par distinto conhecido (Censo A × CPF B, blocking). **Positivo/negativo** no texto = decisão no corte 0,95 (aceitou/recusou), não o rótulo. A ouro não é o universo: precision populacional não se mede aqui.
 - **NB04 — ouro:** cada Censo A deve receber o CPF X. `recall_ouro` = fração dos A's avaliáveis cujo cluster (0,95) contém X. O funil também reporta quantos Censos do subset foram linkados a algum CPF.
