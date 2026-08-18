@@ -66,11 +66,11 @@ Do NB00b em diante tudo consome `registro_limpo`, não `registro_unificado`. O `
 
 O NB03 recarrega o modelo do JSON (labels, sem reestimar). O NB04 usa `splink_clusters.parquet`. `predict()` no NB02 pode gerar pares ≥0,5; **métricas de validação usam 0,95 / clusters**.
 
-**1ª passada do modelo (NB02):** sem `nome_mae*` (Censo ~29% preenchido; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,98. DOB: `DateOfBirthComparison` com faixas de 1 mês e 1 ano (sem 10 anos). Mãe fica para uma 2ª passada. Cópia do JSON em [`models/splink_model.json`](models/splink_model.json).
+**1ª passada do modelo (NB02):** sem `nome_mae*` (Censo ~29% preenchido; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,90. DOB: `DateOfBirthComparison` com faixas de 1 mês e 1 ano. Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). Sem CEP no blocking nem no scoring. Mãe fica para uma 2ª passada. Cópia do JSON em [`models/splink_model.json`](models/splink_model.json).
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
-**Blocking Splink:** regras fonéticas definidas inline no NB02 (`primeiro_nome_phon`, `ultimo_nome_phon`, `sexo`, `data_nascimento`, `cep`). O CEP entra só no blocking OR (lugar-no-tempo); não entra no scoring nem no EM. Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
+**Blocking Splink:** regras fonéticas definidas inline no NB02 (`primeiro_nome_phon`, `ultimo_nome_phon`, `sexo`, `data_nascimento`, `uf`). UF entra só em regras OR extras (recall intra-UF); o interestadual passa pelas regras de nome+DOB. CEP não entra em blocking nem em scoring. Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
 
 Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência mãe didática).
 
@@ -87,7 +87,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 
 ### Idade
 
-No Censo a idade vem de **`PECP0401`** (variável auxiliar calculada, 0–140 anos, universo). No CPF é derivada de `data_nascimento` como anos completos em **`DATA_REFERENCIA_IDADE`** (`2022-08-01`), via `age()` no DuckDB — não é só `2022 - ano`. As colunas do questionário (`PECP0003`/`PECP0030`) ficam só no diagnóstico do NB00.
+No Censo a idade vem de **`PECP0401`** (variável auxiliar calculada, 0–140 anos, universo). No CPF é derivada de `data_nascimento` como anos completos em **`DATA_REFERENCIA_IDADE`** (`2022-08-01`), via `age()` no DuckDB — não é só `2022 - ano`. No Splink a comparação usa exact e `abs(idade_l - idade_r) ≤ 1` (não colunas `idade±1`). As colunas do questionário (`PECP0003`/`PECP0030`) ficam só no diagnóstico do NB00.
 
 Se a idade vier muito nula, a célula **3b do NB00** aponta a causa: tipos das colunas, contagem de nulos de cada lado e os valores crus mais frequentes. Dois casos conhecidos que zeram a idade do CPF inteiro:
 
