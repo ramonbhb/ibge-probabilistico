@@ -7,7 +7,7 @@ requires-python = ">=3.9"
 dependencies = [
     "duckdb>=1.0.0",
     "pandas>=2.0.0",
-    "splink>=4.0.0",
+    "splink==5.0.0.dev1",
     "ipykernel>=6.0.0",
     "matplotlib>=3.8.0",
 ]

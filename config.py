@@ -552,7 +552,24 @@ def materialize_splink_input(
             )
     con.execute(f"""
     CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
-    SELECT * FROM {tabela}
+    SELECT
+        t.*,
+        CASE
+            WHEN t.data_nascimento IS NULL
+              OR TRIM(CAST(t.data_nascimento AS VARCHAR)) = '' THEN NULL
+            ELSE substr(CAST(t.data_nascimento AS VARCHAR), 1, 4)
+        END AS ano_nascimento,
+        CASE
+            WHEN t.data_nascimento IS NULL
+              OR TRIM(CAST(t.data_nascimento AS VARCHAR)) = '' THEN NULL
+            ELSE substr(CAST(t.data_nascimento AS VARCHAR), 6, 2)
+        END AS mes_nascimento,
+        CASE
+            WHEN t.data_nascimento IS NULL
+              OR TRIM(CAST(t.data_nascimento AS VARCHAR)) = '' THEN NULL
+            ELSE substr(CAST(t.data_nascimento AS VARCHAR), 9, 2)
+        END AS dia_nascimento
+    FROM {tabela} t
     """)
     print(f"{SPLINK_INPUT_VIEW} → {tabela}")
     return tabela

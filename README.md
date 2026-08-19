@@ -66,11 +66,21 @@ Do NB00b em diante tudo consome `registro_limpo`, não `registro_unificado`. O `
 
 O NB03 recarrega o modelo do JSON (labels, sem reestimar). O NB04 usa `splink_clusters.parquet`. `predict()` no NB02 pode gerar pares ≥0,5; **métricas de validação usam 0,95 / clusters**.
 
-**1ª passada do modelo (NB02):** sem `nome_mae*` (Censo ~29% preenchido; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,90. DOB: `DateOfBirthComparison` com faixas de 1 mês e 1 ano. Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). Sem CEP no blocking nem no scoring. Mãe fica para uma 2ª passada. Cópia do JSON em [`models/splink_model.json`](models/splink_model.json).
+**1ª passada do modelo (NB02):** sem `nome_mae*` (Censo ~29% preenchido; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,90. DOB: `ExactMatch('data_nascimento')` + TF (string ISO `YYYY-MM-DD`). Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). Sem CEP no blocking nem no scoring. Mãe fica para uma 2ª passada. Cópia do JSON em [`models/splink_model.json`](models/splink_model.json).
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
-**Blocking Splink:** regras fonéticas definidas inline no NB02 (`primeiro_nome_phon`, `ultimo_nome_phon`, `sexo`, `data_nascimento`, `uf`). UF entra só em regras OR extras (recall intra-UF); o interestadual passa pelas regras de nome+DOB. CEP não entra em blocking nem em scoring. Profile, gráfico cumulativo e maiores blocos são executados **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
+**Blocking Splink:** cinco regras OR no NB02 (e as mesmas no `pares_distintos` do NB03). Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sem exigir UF (interestadual entra). CEP não entra.
+
+- `primeiro_nome_phon` + `ultimo_nome_phon` + `sexo` + `ano_nascimento` (mês/dia errados)
+- `primeiro_nome_phon` + `ultimo_nome_phon` + `sexo` + `mes_nascimento` + `dia_nascimento` (ano errado)
+- `primeiro_nome_phon` + `ultimo_nome_phon` + `sexo` + `mes_nascimento` + `ano_nascimento` (dia errado)
+- `primeiro_nome_phon` + `sexo` + `data_nascimento` (último nome errado)
+- `ultimo_nome_phon` + `sexo` + `data_nascimento` (primeiro nome errado)
+
+Profile e gráfico cumulativo de pares candidatos rodam **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
+
+**Splink:** pin [`splink==5.0.0.dev1`](https://pypi.org/project/splink/5.0.0.dev1/). O `Linker` ainda recebe `db_api=` (contrato desta versão). Saídas de comparação usam prefixo `mw_` (match weight) em vez de `bf_`; JSON antigo com `bayes_factor_column_prefix` é ignorado — retreinar no NB02. `predict()` aceita `num_chunks_left` / `num_chunks_right` para volume grande.
 
 Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência mãe didática).
 
