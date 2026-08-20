@@ -380,16 +380,9 @@ def obito_antes_do_censo_sql(
     return f"({ano} IS NOT NULL AND {ano} > 0 AND {ano} <= {corte})"
 
 
-def censo_sem_nome_sql(
-    origem_col: str = "origem",
-    nome_col: str = "nome_completo",
-) -> str:
-    """True para linha do Censo com nome nulo/vazio (imputação)."""
-    nome = texto_nao_vazio_sql(nome_col)
-    return (
-        f"(LOWER(TRIM(CAST({origem_col} AS VARCHAR))) = 'censo' "
-        f"AND {nome} IS NULL)"
-    )
+def sem_nome_sql(nome_col: str = "nome_completo") -> str:
+    """True quando o nome é nulo ou em branco (Censo e CPF)."""
+    return f"({texto_nao_vazio_sql(nome_col)} IS NULL)"
 
 
 def dob_valida_sql(

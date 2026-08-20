@@ -54,7 +54,7 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | Notebook | Função |
 |----------|--------|
 | [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → inferência mãe → CEP → stack |
-| [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito ≤ corte e Censo sem nome; anula data inválida e sentinelas |
+| [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito ≤ corte e registros sem nome (Censo e CPF); anula data inválida e sentinelas |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
 | [`02_deduplicar_splink.ipynb`](notebooks/02_deduplicar_splink.ipynb) | Profile + blocking + treino `link_only` (1ª passada sem mãe) + predict/cluster 0,95 |
 | [`03_validar_coorte.ipynb`](notebooks/03_validar_coorte.ipynb) | Labels Splink (matches conhecidos + pares distintos) → P/R, FP/FN a 0,95 |
@@ -121,7 +121,7 @@ Duas traduções não são literais, porque o RE2 do DuckDB não tem lookahead n
 
 Duas classes de problema, um passe só sobre `registro_unificado`.
 
-**Linha que não pode casar.** CPF com `ano_obito <= ANO_OBITO_CORTE` (hoje 2023) sai da base. Registros do Censo sem `nome_completo` (imputação) também saem (`censo_sem_nome_sql`). O `ano_obito` vem de `CPF_COL_ANO_OBITO` no bronze; o NB00 falha se a coluna não estiver lá. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam.
+**Linha que não pode casar.** CPF com `ano_obito <= ANO_OBITO_CORTE` (hoje 2023) sai da base. Registro sem `nome_completo` (nulo ou em branco) sai nas duas origens (`sem_nome_sql`). O `ano_obito` vem de `CPF_COL_ANO_OBITO` no bronze; o NB00 falha se a coluna não estiver lá. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam.
 
 **Valor-sentinela que o SQL lê como igualdade.** É o problema mais caro dos dois. `l.cep = r.cep` trata `'' = ''` e `'00000000' = '00000000'` como acordo real, então ausência vira par candidato; nas `deterministic_rules` do NB02 vira até match determinístico, contaminando a estimativa do prior. As três colunas afetadas nascem assim: `normalize_date_sql` devolve `''` quando a data não parseia, `cep_norm_sql` faz `lpad(..., 8, '0')` e transforma CEP ausente do CPF em `'00000000'` (o Censo usa `''` para o mesmo caso), e nome que não normaliza vira `''` — inclusive `primeiro_nome` e `ultimo_nome`, que estão na blocking rule principal. Todos viram `NULL`, que não casa com `NULL`.
 
@@ -131,7 +131,7 @@ Data de nascimento inválida é a que não é data real (`2022-02-30` passa pelo
 
 O notebook separa **reencodado** (`''` que já era ausência e só mudou de grafia) de **descartado** (valor que existia e foi julgado inválido). O segundo número é o que merece revisão. Há também uma checagem de impacto na coorte: se o filtro de óbito remove ground truth, alguma das duas fontes está errada.
 
-Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `censo_sem_nome_sql`, `dob_valida_sql`, `cep_valido_sql`, `limpeza_columns_sql`), cobertas por [`tests/test_limpeza.py`](tests/test_limpeza.py).
+Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `sem_nome_sql`, `dob_valida_sql`, `cep_valido_sql`, `limpeza_columns_sql`), cobertas por [`tests/test_limpeza.py`](tests/test_limpeza.py).
 
 ## Saídas
 

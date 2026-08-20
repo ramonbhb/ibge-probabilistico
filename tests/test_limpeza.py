@@ -15,7 +15,7 @@ from config import (  # noqa: E402
     ANO_OBITO_CORTE,
     ANO_REFERENCIA_CENSO,
     SEXO_VALIDOS,
-    censo_sem_nome_sql,
+    sem_nome_sql,
     cep_valido_sql,
     dob_valida_sql,
     limpeza_columns_sql,
@@ -77,18 +77,39 @@ def test_filtro_obito_nao_derruba_linha_por_null(con) -> None:
         ("censo", "", True),
         ("censo", "   ", True),
         ("censo", "JOAO SILVA", False),
-        ("cpf", None, False),
-        ("cpf", "", False),
+        ("cpf", None, True),
+        ("cpf", "", True),
+        ("cpf", "   ", True),
         ("CPF", "JOAO", False),
     ],
 )
-def test_censo_sem_nome(con, origem, nome, removido) -> None:
+def test_sem_nome(con, origem, nome, removido) -> None:
     con.execute(
         "CREATE OR REPLACE TABLE t AS SELECT CAST(? AS VARCHAR) AS origem, "
         "CAST(? AS VARCHAR) AS nome_completo",
         [origem, nome],
     )
-    assert con.execute(f"SELECT {censo_sem_nome_sql()} FROM t").fetchone()[0] is removido
+    assert con.execute(f"SELECT {sem_nome_sql()} FROM t").fetchone()[0] is removido
+
+
+def test_filtros_no_join_qualificam_ano_obito(con) -> None:
+    """O diagnóstico da coorte faz JOIN; sem alias o DuckDB recusa ano_obito."""
+    con.execute(
+        """
+        CREATE TABLE na_base AS SELECT * FROM (VALUES
+            (1, 1990, 'cpf', 'JOAO')
+        ) v(unique_id, ano_obito, origem, nome_completo);
+        CREATE TABLE registro_limpo AS SELECT * FROM na_base;
+        """
+    )
+    sql = f"""
+    SELECT
+        SUM(CASE WHEN {obito_antes_do_censo_sql('b.ano_obito')} THEN 1 ELSE 0 END),
+        SUM(CASE WHEN {sem_nome_sql('b.nome_completo')} THEN 1 ELSE 0 END)
+    FROM na_base b
+    LEFT JOIN registro_limpo l ON l.unique_id = b.unique_id
+    """
+    assert con.execute(sql).fetchone() == (1, 0)
 
 
 # --- Data de nascimento ------------------------------------------------------
