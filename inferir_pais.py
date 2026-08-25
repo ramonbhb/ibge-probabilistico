@@ -92,7 +92,7 @@ def inferir_nome_mae_duckdb(
 ) -> None:
     """Materializa nome_mae inferido por morador.
 
-    **Importante:** `source_table` deve ser a tabela já filtrada por UF
+    **Importante:** `source_table` deve ser a tabela já filtrada geograficamente
     (ex.: `censo_pessoas_filtrado`), nunca o bronze nacional inteiro.
     """
     q = f"""

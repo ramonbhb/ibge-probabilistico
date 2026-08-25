@@ -235,7 +235,7 @@ def test_colunas_estruturais_e_numericas_intactas() -> None:
 
 
 def test_nomes_entram_na_limpeza() -> None:
-    """primeiro_nome e ultimo_nome estão na blocking rule principal do NB02."""
+    """primeiro_nome e ultimo_nome estão na blocking rule principal do 02_treinar."""
     cols = limpeza_columns_sql(tipos_registro())
     for nome in ("nome_completo", "primeiro_nome", "ultimo_nome"):
         assert cols[nome] != nome
@@ -260,5 +260,5 @@ def test_idade_do_cpf_acompanha_a_data(con) -> None:
         f"SELECT origem, {cols['idade']} AS idade FROM t"
     ).fetchall()
     assert linhas == [("cpf", None), ("cpf", 32), ("censo", 40)], (
-        "idade do CPF deriva da data e cai junto; a do Censo vem de PECP0003"
+        "idade do CPF deriva da data e cai junto; a do Censo vem de PECP0401"
     )

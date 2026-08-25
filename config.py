@@ -47,13 +47,10 @@ def normalize_municipio_filtro(filtro: str | int | float | None) -> str | None:
 
 # Recorte geográfico. None = sem filtro (base nacional).
 FILTRO_UF: str | int | None = None            # ex.: 42 (SC)
-FILTRO_MUNICIPIO: str | int | None = 2111300  # ex.: 4205407 (Florianópolis)
+FILTRO_MUNICIPIO: str | int | None = 2111300  # IBGE 7 díg.; None = sem filtro
 
 FILTRO_UF = normalize_uf_filtro(FILTRO_UF)
 FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
-
-# True = gera também as colunas *_phon_sv (fonética agressiva, remove vogais).
-USE_PHONETIC_STRIP_VOWELS = False
 
 # --- Limpeza (NB00b) ---------------------------------------------------------
 
@@ -65,6 +62,9 @@ ANO_OBITO_CORTE = 2023
 # Faixa aceita para o ano de nascimento; fora dela a data vira NULL.
 ANO_NASCIMENTO_MIN = 1900
 
+# Data de referência para idade do CPF (anos completos).
+DATA_REFERENCIA_IDADE = "2022-08-01"
+
 # Categorias de sexo que discriminam. O normalize_sexo_sql devolve a inicial do
 # que não for M/F ('O' de outro, 'I' de ignorado, '9' de não informado), e para
 # o ExactMatch dois resíduos iguais seriam concordância. Só entram os que
@@ -72,6 +72,10 @@ ANO_NASCIMENTO_MIN = 1900
 # de mexer: se a base tiver uma terceira categoria de verdade e com volume,
 # anulá-la joga sinal fora.
 SEXO_VALIDOS = ("M", "F")
+
+# Corte operacional: clustering (02b), métricas (03) e atribuição (04).
+# Override: export THRESHOLD_AVALIACAO=0.98
+THRESHOLD_AVALIACAO = float(os.environ.get("THRESHOLD_AVALIACAO", "0.95"))
 
 
 def set_filtros(
@@ -148,12 +152,14 @@ DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 REGISTRO_UNIFICADO = OUTPUT_DIR / "registro_unificado.parquet"
 REGISTRO_LIMPO = OUTPUT_DIR / "registro_limpo.parquet"
 
-# Artefatos do treino (NB02), consumidos pela validação (NB03 labels, NB04 ouro)
+# JSON no treino (02); predictions/clusters na aplicação (02b); 03 avalia; 04 atribui
 SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
 SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
 SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
-METRICAS_COHORT = OUTPUT_DIR / "metricas_cohort.csv"
-METRICAS_OURO = OUTPUT_DIR / "metricas_ouro.csv"
+METRICAS_AVALIACAO = OUTPUT_DIR / "metricas_avaliacao.csv"
+METRICAS_SWEEP = OUTPUT_DIR / "metricas_sweep.csv"
+METRICAS_ATRIBUICAO = OUTPUT_DIR / "metricas_atribuicao.csv"
+SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
 MODELS_DIR = PROB_DIR / "models"
 
 CPF_NORM_SQL = "lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 11, '0')"
@@ -206,9 +212,6 @@ DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "20"))
 DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "300GB")
 
 ANO_REFERENCIA_CENSO = 2022
-# Data de referência para idade do CPF (anos completos).
-DATA_REFERENCIA_IDADE = "2022-08-01"
-IDADE_MAX = 120
 CENSO_IDADE_MAX = 140
 
 
@@ -529,7 +532,7 @@ SPLINK_INPUT_VIEW = "splink_input"
 def materialize_splink_input(
     con: duckdb.DuckDBPyConnection, *, tabela: str | None = None
 ) -> str:
-    """View de entrada do Splink. Sem labels: a coorte só entra no NB03.
+    """View de entrada do Splink. Sem labels: a coorte só entra no 03.
 
     Prefere a tabela limpa do NB00b. Cair para `registro_unificado` significa
     rodar com '' e '00000000' onde deveria haver NULL, o que infla os blocos,
@@ -568,6 +571,77 @@ def materialize_splink_input(
     return tabela
 
 
+def materialize_ouro_1a1(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cohort_parquet: Path | None = None,
+    cohort_table: str = "cohort_dedup_raw",
+    out_table: str = "ouro_1a1",
+) -> dict[str, int]:
+    """Pares ouro 1:1 nacional: `person_id_censo`, `cpf_norm`.
+
+    Prata (N:1 / 1:N) fica de fora. Carimba CPF no Censo (NB00/00b) e alimenta
+    `materialize_gt_no_subset`. Não é blocking de predição.
+    """
+    if cohort_parquet is not None:
+        con.execute(f"""
+        CREATE OR REPLACE TABLE {cohort_table} AS
+        SELECT * FROM read_parquet('{cohort_parquet}')
+        """)
+    cpf_gt = cpf_norm_sql("CPF_NORM")
+    candidatos = f"{out_table}_candidatos"
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {candidatos} AS
+    SELECT *,
+        COUNT(*) OVER (PARTITION BY person_id_censo) AS n_cpf_por_censo,
+        COUNT(*) OVER (PARTITION BY cpf_norm) AS n_censo_por_cpf
+    FROM (
+        SELECT DISTINCT
+            CAST(PERSON_ID_CENSO AS VARCHAR) AS person_id_censo,
+            {cpf_gt} AS cpf_norm
+        FROM {cohort_table}
+        WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
+    )
+    """)
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {out_table} AS
+    SELECT person_id_censo, cpf_norm
+    FROM {candidatos}
+    WHERE n_cpf_por_censo = 1 AND n_censo_por_cpf = 1
+    """)
+    n_distintos = con.execute(f"SELECT COUNT(*) FROM {candidatos}").fetchone()[0]
+    n_1a1 = con.execute(f"SELECT COUNT(*) FROM {out_table}").fetchone()[0]
+    return {
+        "n_pares_coorte_nacional": int(n_distintos),
+        "n_pares_1a1_nacional": int(n_1a1),
+        "n_prata_descartada": int(n_distintos) - int(n_1a1),
+    }
+
+
+def stamp_censo_cpf_from_ouro(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    table: str,
+    ouro_table: str = "ouro_1a1",
+) -> int:
+    """Preenche `cpf_norm` nas linhas Censo com a ouro 1:1. CPF já tem a coluna.
+
+    `NULL` no Censo sem ouro — `cpf_norm = cpf_norm` não casa NULL com NULL.
+    """
+    con.execute(f"""
+    UPDATE {table} AS t
+    SET cpf_norm = o.cpf_norm
+    FROM {ouro_table} AS o
+    WHERE t.origem = 'censo'
+      AND t.person_id_censo = o.person_id_censo
+    """)
+    n = con.execute(f"""
+    SELECT COUNT(*) FROM {table}
+    WHERE origem = 'censo' AND cpf_norm IS NOT NULL
+    """).fetchone()[0]
+    return int(n)
+
+
 def materialize_gt_no_subset(
     con: duckdb.DuckDBPyConnection,
     *,
@@ -576,18 +650,21 @@ def materialize_gt_no_subset(
     cohort_table: str = "cohort_dedup_raw",
     pairs_table: str = "ground_truth_pairs",
     subset_table: str = "gt_no_subset",
+    ouro_table: str = "ouro_1a1",
 ) -> dict[str, int]:
     """Pares ouro 1:1 com os dois lados em `splink_view`.
 
-    Cria `ground_truth_pairs` (1:1 nacional) e `gt_no_subset` (ambos no recorte).
-    Não calcula métricas — só materializa a amostra rotulável.
+    Cria `ouro_1a1` (1:1 nacional), `ground_truth_pairs` (com unique_id) e
+    `gt_no_subset` (ambos no recorte). Pares N:1 / 1:N (prata) são descartados e
+    contados em `n_prata_descartada`. Não calcula métricas — só materializa a
+    amostra rotulável.
     """
-    if cohort_parquet is not None:
-        con.execute(f"""
-        CREATE OR REPLACE TABLE {cohort_table} AS
-        SELECT * FROM read_parquet('{cohort_parquet}')
-        """)
-    cpf_gt = cpf_norm_sql("CPF_NORM")
+    counts = materialize_ouro_1a1(
+        con,
+        cohort_parquet=cohort_parquet,
+        cohort_table=cohort_table,
+        out_table=ouro_table,
+    )
     con.execute(f"""
     CREATE OR REPLACE TABLE {pairs_table} AS
     SELECT
@@ -595,19 +672,7 @@ def materialize_gt_no_subset(
         'cpf_' || cpf_norm AS unique_id_cpf,
         person_id_censo,
         cpf_norm
-    FROM (
-        SELECT *,
-            COUNT(*) OVER (PARTITION BY person_id_censo) AS n_cpf_por_censo,
-            COUNT(*) OVER (PARTITION BY cpf_norm) AS n_censo_por_cpf
-        FROM (
-            SELECT DISTINCT
-                CAST(PERSON_ID_CENSO AS VARCHAR) AS person_id_censo,
-                {cpf_gt} AS cpf_norm
-            FROM {cohort_table}
-            WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
-        )
-    )
-    WHERE n_cpf_por_censo = 1 AND n_censo_por_cpf = 1
+    FROM {ouro_table}
     """)
     con.execute(f"""
     CREATE OR REPLACE TABLE {subset_table} AS
@@ -616,9 +681,118 @@ def materialize_gt_no_subset(
     JOIN {splink_view} c ON c.unique_id = gt.unique_id_censo
     JOIN {splink_view} p ON p.unique_id = gt.unique_id_cpf
     """)
-    n_1a1 = con.execute(f"SELECT COUNT(*) FROM {pairs_table}").fetchone()[0]
     n_subset = con.execute(f"SELECT COUNT(*) FROM {subset_table}").fetchone()[0]
-    return {"n_pares_1a1_nacional": int(n_1a1), "n_gt_no_subset": int(n_subset)}
+    return {
+        **counts,
+        "n_gt_no_subset": int(n_subset),
+    }
+
+
+def materialize_cluster_composicao(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    clusters_table: str = "splink_clusters",
+    splink_view: str = SPLINK_INPUT_VIEW,
+    out_table: str = "cluster_composicao",
+) -> None:
+    """Tipo de cluster: singleton, 1_para_1, 1_cpf_n_censo, outros."""
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {out_table} AS
+    SELECT
+        cluster_id,
+        COUNT(*) AS n,
+        COUNT(*) FILTER (WHERE s.origem = 'censo') AS n_censo,
+        COUNT(*) FILTER (WHERE s.origem = 'cpf') AS n_cpf,
+        CASE
+            WHEN COUNT(*) = 1 THEN 'singleton'
+            WHEN COUNT(*) FILTER (WHERE s.origem = 'censo') = 1
+             AND COUNT(*) FILTER (WHERE s.origem = 'cpf') = 1 THEN '1_para_1'
+            WHEN COUNT(*) FILTER (WHERE s.origem = 'cpf') = 1
+             AND COUNT(*) FILTER (WHERE s.origem = 'censo') >= 2 THEN '1_cpf_n_censo'
+            ELSE 'outros'
+        END AS tipo
+    FROM {clusters_table} sc
+    JOIN {splink_view} s ON s.unique_id = sc.unique_id
+    GROUP BY cluster_id
+    """)
+
+
+def materialize_atribuicao(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    threshold: float | None = None,
+    predictions_table: str = "splink_predictions",
+    clusters_table: str = "splink_clusters",
+    composicao_table: str = "cluster_composicao",
+    out_table: str = "atribuicao_censo_cpf",
+) -> dict[str, int | float]:
+    """1 CPF por Censo: greedy por score, fora de clusters `outros`.
+
+    Espera `predictions_table` com unique_id_l = Censo, unique_id_r = CPF.
+    Censo e CPF do par precisam estar no mesmo cluster. `outros` (N×M) não entra.
+    Empate de score: desempata por unique_id_censo. Ordena no pandas — o `.df()`
+    do DuckDB não garante a ordem do `ORDER BY`.
+    """
+    import pandas as pd
+
+    t = THRESHOLD_AVALIACAO if threshold is None else float(threshold)
+    candidatos = con.execute(f"""
+    SELECT
+        p.unique_id_l AS unique_id_censo,
+        p.unique_id_r AS unique_id_cpf,
+        p.match_probability,
+        cl.cluster_id,
+        comp.tipo
+    FROM {predictions_table} p
+    JOIN {clusters_table} cl ON cl.unique_id = p.unique_id_l
+    JOIN {clusters_table} cr ON cr.unique_id = p.unique_id_r
+    JOIN {composicao_table} comp ON comp.cluster_id = cl.cluster_id
+    WHERE p.match_probability >= {t}
+      AND cl.cluster_id = cr.cluster_id
+      AND comp.tipo <> 'outros'
+    """).df()
+    if len(candidatos):
+        candidatos = candidatos.sort_values(
+            ["match_probability", "unique_id_censo"],
+            ascending=[False, True],
+            kind="mergesort",
+        )
+
+    used_censo: set[str] = set()
+    used_cpf: set[str] = set()
+    kept: list[dict] = []
+    for row in candidatos.itertuples(index=False):
+        if row.unique_id_censo in used_censo or row.unique_id_cpf in used_cpf:
+            continue
+        used_censo.add(row.unique_id_censo)
+        used_cpf.add(row.unique_id_cpf)
+        kept.append(
+            {
+                "unique_id_censo": row.unique_id_censo,
+                "unique_id_cpf": row.unique_id_cpf,
+                "match_probability": float(row.match_probability),
+                "cluster_id": row.cluster_id,
+                "tipo_cluster": row.tipo,
+            }
+        )
+    out = pd.DataFrame(
+        kept,
+        columns=[
+            "unique_id_censo",
+            "unique_id_cpf",
+            "match_probability",
+            "cluster_id",
+            "tipo_cluster",
+        ],
+    )
+    con.register("_atribuicao_df", out)
+    con.execute(f"CREATE OR REPLACE TABLE {out_table} AS SELECT * FROM _atribuicao_df")
+    con.unregister("_atribuicao_df")
+    return {
+        "n_candidatos": int(len(candidatos)),
+        "n_atribuidos": int(len(out)),
+        "threshold": t,
+    }
 
 
 def drop_splink_temp_tables(con: duckdb.DuckDBPyConnection) -> int:
@@ -739,8 +913,9 @@ def print_paths() -> None:
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)
     print("FILTRO_UF:", FILTRO_UF)
     print("FILTRO_MUNICIPIO:", FILTRO_MUNICIPIO)
-    print("USE_PHONETIC_STRIP_VOWELS:", USE_PHONETIC_STRIP_VOWELS)
     print("ANO_OBITO_CORTE:", ANO_OBITO_CORTE)
     print("ANO_NASCIMENTO_MIN:", ANO_NASCIMENTO_MIN)
+    print("DATA_REFERENCIA_IDADE:", DATA_REFERENCIA_IDADE)
     print("SEXO_VALIDOS:", SEXO_VALIDOS)
+    print("THRESHOLD_AVALIACAO:", THRESHOLD_AVALIACAO)
     print("DUCKDB_ARQUIVO:", DUCKDB_ARQUIVO)

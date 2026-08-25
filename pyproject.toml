@@ -16,4 +16,4 @@ dependencies = [
 dev = ["pytest>=8.0.0"]
 
 [tool.setuptools]
-py-modules = ["config", "features", "inferir_pais"]
+py-modules = ["config", "features", "inferir_pais", "splink_spec"]

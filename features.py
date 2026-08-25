@@ -123,7 +123,7 @@ def _dedupe_consecutive(token: str) -> str:
 
 
 def br_phonetic_basic_token(token: str) -> str:
-    """Substituições fonéticas PT-BR; sem remoção de vogais."""
+    """Substituições fonéticas PT-BR."""
     token = normalize_text(token)
     if not token:
         return ""
@@ -135,26 +135,12 @@ def br_phonetic_basic_token(token: str) -> str:
     return _dedupe_consecutive(token)
 
 
-def br_phonetic_token(token: str, *, strip_vowels: bool = False) -> str:
-    """Fonética básica; strip_vowels=True aplica remoção agressiva de vogais."""
-    token = br_phonetic_basic_token(token)
-    if strip_vowels and len(token) > 1:
-        token = token[0] + re.sub(r"[AEIOU]", "", token[1:])
-        token = _dedupe_consecutive(token)
-    return token
-
-
 def full_name_norm(name) -> str:
     return " ".join(tokenize_name(name))
 
 
 def full_name_phon_basic(name) -> str:
     vals = [br_phonetic_basic_token(t) for t in tokenize_name(name)]
-    return " ".join(v for v in vals if v)
-
-
-def full_name_phon_sv(name) -> str:
-    vals = [br_phonetic_token(t, strip_vowels=True) for t in tokenize_name(name)]
     return " ".join(v for v in vals if v)
 
 
@@ -293,23 +279,14 @@ def _phonetic_map_sql(expr: str) -> str:
     return f"replace(replace({out}, 'Q', 'K'), 'C', 'K')"
 
 
-def phonetic_token_sql(expr: str, *, strip_vowels: bool = False) -> str:
-    """br_phonetic_token() em SQL, para um token já normalizado."""
-    basico = dedupe_consecutive_sql(_phonetic_map_sql(expr))
-    if not strip_vowels:
-        return basico
-    # O Python só remove vogais quando len > 1, mas o guarda é dispensável:
-    # para '' e para um caractere único as duas expressões coincidem.
-    sem_vogais = (
-        f"substr({basico}, 1, 1) || "
-        f"regexp_replace(substr({basico}, 2), '[AEIOU]', '', 'g')"
-    )
-    return dedupe_consecutive_sql(sem_vogais)
+def phonetic_token_sql(expr: str) -> str:
+    """br_phonetic_basic_token() em SQL, para um token já normalizado."""
+    return dedupe_consecutive_sql(_phonetic_map_sql(expr))
 
 
-def phonetic_name_sql(norm_col: str, *, strip_vowels: bool = False) -> str:
-    """full_name_phon_*() em SQL: fonética por token, descartando os vazios."""
-    token_expr = phonetic_token_sql("_tok", strip_vowels=strip_vowels)
+def phonetic_name_sql(norm_col: str) -> str:
+    """full_name_phon_basic() em SQL: fonética por token, descartando os vazios."""
+    token_expr = phonetic_token_sql("_tok")
     tokens = f"list_transform(string_split({norm_col}, ' '), _tok -> {token_expr})"
     return f"array_to_string(list_filter({tokens}, _v -> _v <> ''), ' ')"
 
@@ -341,10 +318,6 @@ PESSOA_COLUMNS = {
     "primeiro_nome_phon": "primeiro_nome_phon",
     "nome_meio_phon": "nome_meio_phon",
     "ultimo_nome_phon": "ultimo_nome_phon",
-    "nome_completo_phon_sv": "nome_completo_phon_sv",
-    "primeiro_nome_phon_sv": "primeiro_nome_phon_sv",
-    "nome_meio_phon_sv": "nome_meio_phon_sv",
-    "ultimo_nome_phon_sv": "ultimo_nome_phon_sv",
 }
 
 NOME_MAE_COLUMNS = {
@@ -356,17 +329,12 @@ NOME_MAE_COLUMNS = {
     "primeiro_nome_phon": "primeiro_nome_mae_phon",
     "nome_meio_phon": "nome_meio_mae_phon",
     "ultimo_nome_phon": "ultimo_nome_mae_phon",
-    "nome_completo_phon_sv": "nome_mae_phon_sv",
-    "primeiro_nome_phon_sv": "primeiro_nome_mae_phon_sv",
-    "nome_meio_phon_sv": "nome_meio_mae_phon_sv",
-    "ultimo_nome_phon_sv": "ultimo_nome_mae_phon_sv",
 }
 
 
 def name_feature_columns_sql(
     norm_col: str,
     *,
-    strip_vowels: bool | None = None,
     col_map: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Colunas de nome (split + fonética) a partir de coluna já limpa.
@@ -374,11 +342,6 @@ def name_feature_columns_sql(
     Espera `clean_name_sql` aplicado antes (partículas removidas, vazio = NULL).
     Fonética é calculada uma vez no nome completo e repartida por split.
     """
-    if strip_vowels is None:
-        from config import USE_PHONETIC_STRIP_VOWELS
-
-        strip_vowels = USE_PHONETIC_STRIP_VOWELS
-
     safe = f"coalesce({norm_col}, '')"
     partes = _split_parts_sql(safe)
     completo_phon = phonetic_name_sql(safe)
@@ -394,13 +357,6 @@ def name_feature_columns_sql(
         "nome_meio_phon": _nullif_empty_sql(partes_phon["nome_meio"]),
         "ultimo_nome_phon": _nullif_empty_sql(partes_phon["ultimo_nome"]),
     }
-    if strip_vowels:
-        completo_sv = phonetic_name_sql(safe, strip_vowels=True)
-        partes_sv = _split_parts_sql(completo_sv)
-        cols["nome_completo_phon_sv"] = _nullif_empty_sql(completo_sv)
-        cols["primeiro_nome_phon_sv"] = _nullif_empty_sql(partes_sv["primeiro_nome"])
-        cols["nome_meio_phon_sv"] = _nullif_empty_sql(partes_sv["nome_meio"])
-        cols["ultimo_nome_phon_sv"] = _nullif_empty_sql(partes_sv["ultimo_nome"])
     if col_map:
         cols = {col_map[k]: v for k, v in cols.items() if k in col_map}
     return cols

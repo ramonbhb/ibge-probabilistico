@@ -16,7 +16,6 @@ from features import (  # noqa: E402
     clean_name,
     clean_name_sql,
     full_name_phon_basic,
-    full_name_phon_sv,
     name_feature_columns_sql,
     select_list_sql,
     split_name_three_parts,
@@ -68,10 +67,6 @@ CHAVES = [
     "primeiro_nome_phon",
     "nome_meio_phon",
     "ultimo_nome_phon",
-    "nome_completo_phon_sv",
-    "primeiro_nome_phon_sv",
-    "nome_meio_phon_sv",
-    "ultimo_nome_phon_sv",
 ]
 
 
@@ -82,8 +77,6 @@ def referencia_python(nome: str) -> dict[str, str | None]:
     p_phon, m_phon, u_phon = (
         split_name_three_parts(completo_phon) if completo_phon else ("", "", "")
     )
-    completo_sv = full_name_phon_sv(limpo) if limpo else ""
-    p_sv, m_sv, u_sv = split_name_three_parts(completo_sv) if completo_sv else ("", "", "")
 
     def nulo(v: str) -> str | None:
         return v if v else None
@@ -97,10 +90,6 @@ def referencia_python(nome: str) -> dict[str, str | None]:
         "primeiro_nome_phon": nulo(p_phon),
         "nome_meio_phon": nulo(m_phon),
         "ultimo_nome_phon": nulo(u_phon),
-        "nome_completo_phon_sv": nulo(completo_sv),
-        "primeiro_nome_phon_sv": nulo(p_sv),
-        "nome_meio_phon_sv": nulo(m_sv),
-        "ultimo_nome_phon_sv": nulo(u_sv),
     }
 
 
@@ -113,9 +102,7 @@ def resultado_sql() -> dict[str, dict[str, str | None]]:
     con.executemany(
         "INSERT INTO bruto VALUES (?, ?)", list(enumerate(NOMES))
     )
-    cols = name_feature_columns_sql(
-        "nome_norm", strip_vowels=True, col_map=PESSOA_COLUMNS
-    )
+    cols = name_feature_columns_sql("nome_norm", col_map=PESSOA_COLUMNS)
     sql = f"""
     WITH norm AS (
         SELECT id, {clean_name_sql('nome')} AS nome_norm FROM bruto
@@ -181,16 +168,16 @@ def test_nome_mae_renomeia_colunas() -> None:
     from features import NOME_MAE_COLUMNS
 
     cols = name_feature_columns_sql(
-        "nome_mae_norm", strip_vowels=True, col_map=NOME_MAE_COLUMNS
+        "nome_mae_norm", col_map=NOME_MAE_COLUMNS
     )
     assert set(cols) == set(NOME_MAE_COLUMNS.values())
     assert cols["nome_mae"] == "nome_mae_norm"
     assert "nome_meio_mae_phon" in cols
 
 
-def test_sem_strip_vowels_omite_colunas_sv() -> None:
-    cols = name_feature_columns_sql("nome_norm", strip_vowels=False)
-    assert not any(alias.endswith("_phon_sv") for alias in cols)
+def test_nao_gera_colunas_phon_sv() -> None:
+    cols = name_feature_columns_sql("nome_norm")
+    assert not any("phon_sv" in alias for alias in cols)
 
 
 @pytest.mark.skipif(
@@ -214,7 +201,7 @@ def test_benchmark_list_reduce() -> None:
         FROM range({n}) t(i)
         """
     )
-    cols = name_feature_columns_sql("nome_norm", strip_vowels=True)
+    cols = name_feature_columns_sql("nome_norm")
     sql = f"""
     CREATE TABLE saida AS
     WITH norm AS (SELECT {clean_name_sql('nome')} AS nome_norm FROM amostra)
