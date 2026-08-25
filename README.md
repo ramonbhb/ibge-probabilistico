@@ -1,6 +1,6 @@
 # Linkage probabilístico — Censo × CPF
 
-Pipeline interativo (notebooks + DuckDB) para empilhar **bases bronze** CPF e Censo, rodar **Splink link_only** (Censo × CPF, sem pares intra-base) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
+Pipeline interativo (notebooks + DuckDB) para preparar **bases bronze** CPF e Censo (sem empilhar), rodar **Splink link_only** (Censo × CPF) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
 
 Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) só carrega o JSON. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb): score no par e recall no cluster. Lista operacional (1 CPF por Censo) no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb). Corte: **`THRESHOLD_AVALIACAO`** (default 0,95).
 
@@ -18,12 +18,13 @@ Recorte geográfico e limpeza mudam a cada rodada e ficam versionados, no bloco 
 ```python
 FILTRO_UF: str | int | None = None            # ex.: 42 (SC); None = nacional
 FILTRO_MUNICIPIO: str | int | None = 2111300  # IBGE 7 díg.; None = sem filtro
-ANO_OBITO_CORTE = 2023                        # ano_obito <= corte sai da base (NB00b)
+ANO_OBITO_CORTE = 2023                        # ano_obito <= corte sai (NB00b); 0 = não remove ninguém
 DATA_REFERENCIA_IDADE = "2022-08-01"           # idade CPF = anos completos nesta data
 ANO_NASCIMENTO_MIN = 1900                     # ano fora de [MIN, 2022] anula a data
 SEXO_VALIDOS = ("M", "F")                     # fora daqui o sexo vira NULL
 ```
 
+`ANO_OBITO_CORTE = 0` desliga o filtro de óbito (a regra exige `ano > 0` e `ano <= corte`). Subir o corte (ex. 2030) remove **mais** gente, não desliga.
 Corte de clustering/métricas: `THRESHOLD_AVALIACAO` (default `0.95`), também sobrescreve por `export THRESHOLD_AVALIACAO=0.98`.
 
 Não existem `export FILTRO_UF` / `export FILTRO_MUNICIPIO`: filtro é parâmetro de análise, não configuração de ambiente.
@@ -45,8 +46,8 @@ Têm default em `config.py` e aceitam variável de ambiente:
 ```bash
 export OUTPUT_DIR=~/data/probabilistico_output
 export DUCKDB_THREADS=20           # Splink/DuckDB
-export DUCKDB_MEMORY_LIMIT=300GB   # Splink/DuckDB
-export THRESHOLD_AVALIACAO=0.95    # clustering 02b, métricas 03, atribuição 04
+export DUCKDB_MEMORY_LIMIT=370GB   # Splink/DuckDB
+export THRESHOLD_AVALIACAO=0.99    # clustering 02b, métricas 03, atribuição 04
 ```
 
 Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_ARQUIVO` (default `~/singed/bases/raw/censo/data_cep_uniq.csv`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `DUCKDB_TEMP_DIR`.
@@ -55,8 +56,8 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 
 | Notebook | Função |
 |----------|--------|
-| [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → inferência mãe → CEP → CPF ouro 1:1 no Censo → stack |
-| [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Remove óbito ≤ corte e registros sem nome (Censo e CPF); anula data inválida e sentinelas |
+| [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → mãe → CEP → CPF da coorte no Censo → `censo_registros` + `cpf_registros` (sem stack) |
+| [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Limpa cada base → `censo_limpo` / `cpf_limpo`; óbito ≤ corte; sem nome; sentinelas → NULL; re-carimba CPF da coorte |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
 | [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb) | Profile + blocking + treino `link_only` (1ª passada sem mãe) → `splink_model.json` |
 | [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | Carrega o JSON (não retreina) → `predict(0,5)` + cluster `THRESHOLD_AVALIACAO` |
@@ -65,11 +66,11 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 
 **Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` atribuir.
 
-Do NB00b em diante tudo consome `registro_limpo`, não `registro_unificado`. O `materialize_splink_input` resolve isso sozinho e avisa alto se cair na tabela suja.
+Do NB00b em diante o Splink consome `censo_limpo` ∪ `cpf_limpo` via `materialize_splink_input` (view `splink_input`). Sem `registro_unificado` / `registro_limpo` empilhados.
 
 O `03_avaliar` usa `splink_predictions.parquet` e `splink_clusters.parquet`. `predict()` no `02b_aplicar` gera pares ≥0,5; **clustering, métricas e atribuição usam `THRESHOLD_AVALIACAO`** (default 0,95). Se o JSON não existir, o `02b` falha apontando o notebook de treino — não retreina sozinho. O JSON só é recarregado no 03 para o diagnóstico opcional (curva/waterfall). O 04 não depende das células do 03; gera `splink_atribuicao.parquet`.
 
-**1ª passada do modelo (`02_treinar`):** sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,92. DOB: `data_nascimento` e partes (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) com Null → Exact → Damerau-Levenshtein ≤ 1 → Else. TF só na data completa e no ano (mês tem 12 valores, dia 31). Data completa exact implica ano+mês+dia exact — o EM ainda estima, mas os pesos se sobrepõem um pouco, como nome completo + partes. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra numa regra de predição sem nome (DOB+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, só da ouro 1:1 (`materialize_ouro_1a1`). Entra no prior determinístico (`block_on('cpf_norm')` junto com nome+DOB) e num EM; **não** entra no blocking de predição nem no score — senão a ouro sempre seria candidata e o 03 circularia. `NULL = NULL` é falso, então Censo sem ouro não fabrica par. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
+**1ª passada do modelo (`02_treinar`):** sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,92. DOB: `data_nascimento` e partes (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) com Null → Exact → Damerau-Levenshtein ≤ 1 → Else. TF só na data completa e no ano (mês tem 12 valores, dia 31). Data completa exact implica ano+mês+dia exact — o EM ainda estima, mas os pesos se sobrepõem um pouco, como nome completo + partes. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra numa regra de predição sem nome (DOB+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
@@ -98,7 +99,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 
 - Nome: completo, primeiro/meio/último (partículas `DA`, `DOS`, etc. e placeholders `DESCONHECIDO`, `MAE` removidos por [`clean_name_sql`](features.py); vazio → `NULL`)
 - **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py)). Sofre o mesmo split da pessoa: `primeiro_nome_mae`, `nome_meio_mae`, `ultimo_nome_mae`, com as fonéticas correspondentes. Vazio vira `NULL` (`NULLIF`), para o Splink não casar `'' = ''`
-- **`cpf_norm`:** no CPF, `COD_CPF` normalizado (11 díg.). No Censo, só quem está na ouro 1:1 da coorte (`materialize_ouro_1a1`); o resto fica `NULL`. Coluna estrutural (não entra no NULLIF em massa). Treino: prior + EM. Não entra no score nem nas 12 regras de predição.
+- **`cpf_norm`:** no CPF, `COD_CPF` normalizado (11 díg.). No Censo, join com `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`; `MIN` se ambíguo; NULL fora da coorte). Coluna estrutural. Treino: prior + EM. Não entra no score nem nas 12 regras de predição.
 - **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
 - Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
@@ -129,9 +130,9 @@ Duas traduções não são literais, porque o RE2 do DuckDB não tem lookahead n
 
 ## Limpeza (NB00b)
 
-Duas classes de problema, um passe só sobre `registro_unificado`.
+Duas classes de problema, um passe sobre **cada** base (`censo_registros` / `cpf_registros`).
 
-**Linha que não pode casar.** CPF com `ano_obito <= ANO_OBITO_CORTE` (hoje 2023) sai da base. Registro sem `nome_completo` (nulo ou em branco) sai nas duas origens (`sem_nome_sql`). O `ano_obito` vem de `CPF_COL_ANO_OBITO` no bronze; o NB00 falha se a coluna não estiver lá. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam.
+**Linha que não pode casar.** CPF com `ano_obito <= ANO_OBITO_CORTE` (hoje 2023) sai da base. `ANO_OBITO_CORTE = 0` desliga o filtro. Registro sem `nome_completo` (nulo ou em branco) sai nas duas origens (`sem_nome_sql`). O `ano_obito` vem de `CPF_COL_ANO_OBITO` no bronze; o NB00 falha se a coluna não estiver lá. Ano nulo (vivo, e todo o Censo), zero e valores absurdos no futuro ficam.
 
 **Valor-sentinela que o SQL lê como igualdade.** É o problema mais caro dos dois. `l.cep = r.cep` trata `'' = ''` e `'00000000' = '00000000'` como acordo real, então ausência vira par candidato; nas `deterministic_rules` do `02_treinar` vira até match determinístico, contaminando a estimativa do prior. As três colunas afetadas nascem assim: `normalize_date_sql` devolve `''` quando a data não parseia, `cep_norm_sql` faz `lpad(..., 8, '0')` e transforma CEP ausente do CPF em `'00000000'` (o Censo usa `''` para o mesmo caso), e nome que não normaliza vira `''` — inclusive `primeiro_nome` e `ultimo_nome`. Todos viram `NULL`, que não casa com `NULL`.
 
@@ -149,8 +150,8 @@ Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `sem_nome_sql`, 
 
 | Arquivo | Origem |
 |---------|--------|
-| `probabilistico.duckdb`, `registro_unificado.parquet` | NB00 |
-| `registro_limpo.parquet` | NB00b |
+| `probabilistico.duckdb`, `censo_registros.parquet`, `cpf_registros.parquet` | NB00 |
+| `censo_limpo.parquet`, `cpf_limpo.parquet` | NB00b |
 | `splink_model.json` | `02_treinar` |
 | `splink_predictions.parquet`, `splink_clusters.parquet`, `dashboards/cluster_studio.html` | `02b_aplicar` |
 | `models/splink_model.json` | cópia versionada do modelo (atualizar após retreino no `02_treinar`) |
@@ -160,10 +161,10 @@ Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `sem_nome_sql`, 
 
 ## Ground truth
 
-Somente `cohort_dedup.parquet` — ouro + prata. Pares N:1 / 1:N (prata) são descartados em `materialize_ouro_1a1` / `materialize_gt_no_subset`; o `03_avaliar` reporta `n_prata_descartada`.
+`cohort_dedup.parquet` é **toda confiável**. Avaliação (03/04) usa pares **estruturalmente 1:1** (1 CPF por Censo e 1 Censo por CPF). N:1 / 1:N saem em `n_nao_1a1_descartada` — não há filtro por rótulo “ouro vs prata” do arquivo.
 
-A ouro 1:1 **carimba** `cpf_norm` no Censo no NB00/00b, só para o treino (prior/EM). A avaliação continua no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) e a lista no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) — o score e o blocking de predição não vêem o CPF, então o recall da ouro não é circular.
+A coorte também **carimba** `cpf_norm` no Censo (NB00/00b) para o treino (prior/EM). O score e o blocking de predição **não** vêem o CPF, então o recall da GT no 03 não é circular.
 
-- **Seção A — pares:** `cobertura_blocking` = fração da ouro 1:1 do subset que colide em ≥1 regra; `recall_par_ouro` = ouro com par pontuado ≥ `THRESHOLD_AVALIACAO`; `fp_amostra` = fração da amostra de pares distintos conhecidos (cap 5/âncora) com score ≥ threshold — não é precision populacional. O 03 lista amostras de miss de blocking, FN de score e FP da amostra, e grava um sweep SQL (`metricas_sweep.csv`).
+- **Seção A — pares:** `cobertura_blocking` = fração da GT 1:1 do subset que colide em ≥1 regra; `recall_par_ouro` = GT com par pontuado ≥ `THRESHOLD_AVALIACAO`; `fp_amostra` = fração da amostra de pares distintos conhecidos (cap 5/âncora) com score ≥ threshold — não é precision populacional. O 03 lista amostras de miss de blocking, FN de score e FP da amostra, e grava um sweep SQL (`metricas_sweep.csv`).
 - **Seção B — clusters:** cada Censo A deve receber o CPF X. `recall_cluster_ouro` = fração dos A's avaliáveis cujo cluster contém X. O funil também reporta quantos Censos do subset foram linkados a algum CPF; a quebra por tipo (`outros`) mostra inflação por mega-cluster.
-- **04 — atribuição:** cada Censo recebe no máximo um CPF (greedy por score, cluster `<> outros`). `recall_atribuicao` = fração da ouro 1:1 cujo CPF atribuído é o X.
+- **04 — atribuição:** cada Censo recebe no máximo um CPF (greedy por score, cluster `<> outros`). `recall_atribuicao` = fração da GT 1:1 cujo CPF atribuído é o X.

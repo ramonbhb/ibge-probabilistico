@@ -57,7 +57,9 @@ FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
 # Remove do CPF quem tem ano_obito <= corte (inclusive). Quem tem ano nulo
 # (vivo) e o Censo inteiro nunca são afetados. Anos absurdos no futuro (9999)
 # ficam: só o intervalo (0, corte] é motivo de exclusão.
-ANO_OBITO_CORTE = 2023
+# Para não remover ninguém: ANO_OBITO_CORTE = 0 (exige ano > 0 AND ano <= corte).
+# Subir o corte (ex. 2030) remove mais, não desliga o filtro.
+ANO_OBITO_CORTE = 0
 
 # Faixa aceita para o ano de nascimento; fora dela a data vira NULL.
 ANO_NASCIMENTO_MIN = 1900
@@ -75,7 +77,7 @@ SEXO_VALIDOS = ("M", "F")
 
 # Corte operacional: clustering (02b), métricas (03) e atribuição (04).
 # Override: export THRESHOLD_AVALIACAO=0.98
-THRESHOLD_AVALIACAO = float(os.environ.get("THRESHOLD_AVALIACAO", "0.95"))
+THRESHOLD_AVALIACAO = float(os.environ.get("THRESHOLD_AVALIACAO", "0.99"))
 
 
 def set_filtros(
@@ -149,8 +151,16 @@ COHORT_DEDUP_ARQUIVO = Path(
 
 DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
 
-REGISTRO_UNIFICADO = OUTPUT_DIR / "registro_unificado.parquet"
-REGISTRO_LIMPO = OUTPUT_DIR / "registro_limpo.parquet"
+# NB00: bases separadas (sem empilhar). NB00b limpa cada uma.
+CENSO_REGISTROS = OUTPUT_DIR / "censo_registros.parquet"
+CPF_REGISTROS = OUTPUT_DIR / "cpf_registros.parquet"
+CENSO_LIMPO = OUTPUT_DIR / "censo_limpo.parquet"
+CPF_LIMPO = OUTPUT_DIR / "cpf_limpo.parquet"
+
+TABELA_CENSO_REGISTROS = "censo_registros"
+TABELA_CPF_REGISTROS = "cpf_registros"
+TABELA_CENSO_LIMPA = "censo_limpo"
+TABELA_CPF_LIMPA = "cpf_limpo"
 
 # JSON no treino (02); predictions/clusters na aplicação (02b); 03 avalia; 04 atribui
 SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
@@ -362,8 +372,6 @@ def idade_cpf_sql(
 # determinístico na estimativa do prior. NULL não casa com NULL, que é o
 # comportamento que queremos para dado ausente.
 
-TABELA_LIMPA = "registro_limpo"
-
 # Identificam a linha e não entram em comparação nem em blocking; '' nelas não
 # fabrica par, então ficam fora do NULLIF em massa.
 COLUNAS_ESTRUTURAIS = frozenset(
@@ -528,28 +536,7 @@ def get_connection(
 
 SPLINK_INPUT_VIEW = "splink_input"
 
-
-def materialize_splink_input(
-    con: duckdb.DuckDBPyConnection, *, tabela: str | None = None
-) -> str:
-    """View de entrada do Splink. Sem labels: a coorte só entra no 03.
-
-    Prefere a tabela limpa do NB00b. Cair para `registro_unificado` significa
-    rodar com '' e '00000000' onde deveria haver NULL, o que infla os blocos,
-    então o aviso é ruidoso de propósito.
-    """
-    if tabela is None:
-        tabelas = list_tables(con)
-        tabela = TABELA_LIMPA if TABELA_LIMPA in tabelas else "registro_unificado"
-        if tabela != TABELA_LIMPA:
-            print(
-                f"AVISO: {TABELA_LIMPA} não existe — usando registro_unificado, "
-                "com os valores-sentinela ainda no lugar. Rode o NB00b."
-            )
-    con.execute(f"""
-    CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
-    SELECT
-        t.*,
+_DOB_PARTS_SQL = """
         CASE
             WHEN t.data_nascimento IS NULL
               OR TRIM(CAST(t.data_nascimento AS VARCHAR)) = '' THEN NULL
@@ -565,29 +552,149 @@ def materialize_splink_input(
               OR TRIM(CAST(t.data_nascimento AS VARCHAR)) = '' THEN NULL
             ELSE substr(CAST(t.data_nascimento AS VARCHAR), 9, 2)
         END AS dia_nascimento
-    FROM {tabela} t
-    """)
-    print(f"{SPLINK_INPUT_VIEW} → {tabela}")
-    return tabela
+"""
 
 
-def materialize_ouro_1a1(
+def materialize_splink_input(
     con: duckdb.DuckDBPyConnection,
     *,
-    cohort_parquet: Path | None = None,
-    cohort_table: str = "cohort_dedup_raw",
-    out_table: str = "ouro_1a1",
-) -> dict[str, int]:
-    """Pares ouro 1:1 nacional: `person_id_censo`, `cpf_norm`.
+    censo_table: str | None = None,
+    cpf_table: str | None = None,
+) -> tuple[str, str]:
+    """View `splink_input` = UNION das duas bases limpas (+ partes DOB).
 
-    Prata (N:1 / 1:N) fica de fora. Carimba CPF no Censo (NB00/00b) e alimenta
-    `materialize_gt_no_subset`. Não é blocking de predição.
+    Prefere `censo_limpo` / `cpf_limpo`. Se faltarem, cai nas tabelas do NB00
+    (ainda com sentinelas) e avisa.
     """
+    tabelas = list_tables(con)
+    censo = censo_table or (
+        TABELA_CENSO_LIMPA
+        if TABELA_CENSO_LIMPA in tabelas
+        else TABELA_CENSO_REGISTROS
+    )
+    cpf = cpf_table or (
+        TABELA_CPF_LIMPA if TABELA_CPF_LIMPA in tabelas else TABELA_CPF_REGISTROS
+    )
+    if censo not in tabelas or cpf not in tabelas:
+        raise RuntimeError(
+            f"Tabelas ausentes para Splink: censo={censo!r}, cpf={cpf!r}. "
+            "Rode o NB00 e o NB00b."
+        )
+    if censo != TABELA_CENSO_LIMPA or cpf != TABELA_CPF_LIMPA:
+        print(
+            f"AVISO: usando {censo}/{cpf} em vez de "
+            f"{TABELA_CENSO_LIMPA}/{TABELA_CPF_LIMPA} — "
+            "sentinelas podem ainda estar no lugar. Rode o NB00b."
+        )
+    con.execute(f"""
+    CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
+    SELECT t.*, {_DOB_PARTS_SQL}
+    FROM (
+        SELECT * FROM {censo}
+        UNION ALL
+        SELECT * FROM {cpf}
+    ) t
+    """)
+    print(f"{SPLINK_INPUT_VIEW} → {censo} ∪ {cpf}")
+    return censo, cpf
+
+
+def _load_cohort_table(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cohort_parquet: Path | None,
+    cohort_table: str,
+) -> None:
     if cohort_parquet is not None:
         con.execute(f"""
         CREATE OR REPLACE TABLE {cohort_table} AS
         SELECT * FROM read_parquet('{cohort_parquet}')
         """)
+
+
+def materialize_cohort_cpf_por_censo(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cohort_parquet: Path | None = None,
+    cohort_table: str = "cohort_dedup_raw",
+    out_table: str = "cohort_cpf_por_censo",
+) -> dict[str, int]:
+    """Um `cpf_norm` por `person_id_censo` a partir da coorte (MIN se ambíguo).
+
+    Carimba o Censo no NB00/00b. Não é blocking de predição. Toda a
+    `cohort_dedup` é confiável; ambiguidade N CPFs por Censo não deve ocorrer.
+    """
+    _load_cohort_table(con, cohort_parquet=cohort_parquet, cohort_table=cohort_table)
+    cpf_gt = cpf_norm_sql("CPF_NORM")
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {out_table} AS
+    SELECT
+        CAST(PERSON_ID_CENSO AS VARCHAR) AS person_id_censo,
+        MIN({cpf_gt}) AS cpf_norm,
+        COUNT(DISTINCT {cpf_gt}) AS n_cpf_distintos
+    FROM {cohort_table}
+    WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
+    GROUP BY 1
+    """)
+    n_censo = con.execute(f"SELECT COUNT(*) FROM {out_table}").fetchone()[0]
+    n_ambig = con.execute(
+        f"SELECT COUNT(*) FROM {out_table} WHERE n_cpf_distintos > 1"
+    ).fetchone()[0]
+    return {
+        "n_censo_com_cpf_coorte": int(n_censo),
+        "n_censo_cpf_ambiguo": int(n_ambig),
+    }
+
+
+def stamp_censo_cpf_from_cohort(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    table: str,
+    cohort_cpf_table: str = "cohort_cpf_por_censo",
+) -> int:
+    """Preenche `cpf_norm` no Censo a partir da coorte. CPF bronze já tem a coluna.
+
+    Aceita tabela só-Censo (sem coluna `origem`) ou empilhada legada.
+    `NULL` no Censo fora da coorte — igualdade NULL não fabrica par.
+    """
+    cols = {
+        r[0]
+        for r in con.execute(f"DESCRIBE {table}").fetchall()
+    }
+    origem_clause = "AND t.origem = 'censo'" if "origem" in cols else ""
+    con.execute(f"""
+    UPDATE {table} AS t
+    SET cpf_norm = o.cpf_norm
+    FROM {cohort_cpf_table} AS o
+    WHERE t.person_id_censo = o.person_id_censo
+      {origem_clause}
+    """)
+    if "origem" in cols:
+        n = con.execute(f"""
+        SELECT COUNT(*) FROM {table}
+        WHERE origem = 'censo' AND cpf_norm IS NOT NULL
+        """).fetchone()[0]
+    else:
+        n = con.execute(f"""
+        SELECT COUNT(*) FROM {table}
+        WHERE cpf_norm IS NOT NULL
+        """).fetchone()[0]
+    return int(n)
+
+
+def materialize_gt_1a1(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cohort_parquet: Path | None = None,
+    cohort_table: str = "cohort_dedup_raw",
+    out_table: str = "gt_1a1",
+) -> dict[str, int]:
+    """Pares 1:1 da `cohort_dedup` (lista toda confiável).
+
+    Critério estrutural: 1 CPF por Censo e 1 Censo por CPF. N:1 / 1:N saem em
+    `n_nao_1a1_descartada`. Alimenta `materialize_gt_no_subset`.
+    """
+    _load_cohort_table(con, cohort_parquet=cohort_parquet, cohort_table=cohort_table)
     cpf_gt = cpf_norm_sql("CPF_NORM")
     candidatos = f"{out_table}_candidatos"
     con.execute(f"""
@@ -614,32 +721,8 @@ def materialize_ouro_1a1(
     return {
         "n_pares_coorte_nacional": int(n_distintos),
         "n_pares_1a1_nacional": int(n_1a1),
-        "n_prata_descartada": int(n_distintos) - int(n_1a1),
+        "n_nao_1a1_descartada": int(n_distintos) - int(n_1a1),
     }
-
-
-def stamp_censo_cpf_from_ouro(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    table: str,
-    ouro_table: str = "ouro_1a1",
-) -> int:
-    """Preenche `cpf_norm` nas linhas Censo com a ouro 1:1. CPF já tem a coluna.
-
-    `NULL` no Censo sem ouro — `cpf_norm = cpf_norm` não casa NULL com NULL.
-    """
-    con.execute(f"""
-    UPDATE {table} AS t
-    SET cpf_norm = o.cpf_norm
-    FROM {ouro_table} AS o
-    WHERE t.origem = 'censo'
-      AND t.person_id_censo = o.person_id_censo
-    """)
-    n = con.execute(f"""
-    SELECT COUNT(*) FROM {table}
-    WHERE origem = 'censo' AND cpf_norm IS NOT NULL
-    """).fetchone()[0]
-    return int(n)
 
 
 def materialize_gt_no_subset(
@@ -650,20 +733,18 @@ def materialize_gt_no_subset(
     cohort_table: str = "cohort_dedup_raw",
     pairs_table: str = "ground_truth_pairs",
     subset_table: str = "gt_no_subset",
-    ouro_table: str = "ouro_1a1",
+    gt_table: str = "gt_1a1",
 ) -> dict[str, int]:
-    """Pares ouro 1:1 com os dois lados em `splink_view`.
+    """Pares 1:1 da coorte com os dois lados em `splink_view`.
 
-    Cria `ouro_1a1` (1:1 nacional), `ground_truth_pairs` (com unique_id) e
-    `gt_no_subset` (ambos no recorte). Pares N:1 / 1:N (prata) são descartados e
-    contados em `n_prata_descartada`. Não calcula métricas — só materializa a
-    amostra rotulável.
+    Cria `gt_1a1` (nacional), `ground_truth_pairs` e `gt_no_subset` (recorte).
+    Toda a `cohort_dedup` é confiável; só N:1 / 1:N saem (`n_nao_1a1_descartada`).
     """
-    counts = materialize_ouro_1a1(
+    counts = materialize_gt_1a1(
         con,
         cohort_parquet=cohort_parquet,
         cohort_table=cohort_table,
-        out_table=ouro_table,
+        out_table=gt_table,
     )
     con.execute(f"""
     CREATE OR REPLACE TABLE {pairs_table} AS
@@ -672,7 +753,7 @@ def materialize_gt_no_subset(
         'cpf_' || cpf_norm AS unique_id_cpf,
         person_id_censo,
         cpf_norm
-    FROM {ouro_table}
+    FROM {gt_table}
     """)
     con.execute(f"""
     CREATE OR REPLACE TABLE {subset_table} AS
@@ -685,7 +766,31 @@ def materialize_gt_no_subset(
     return {
         **counts,
         "n_gt_no_subset": int(n_subset),
+        # alias legado
+        "n_prata_descartada": counts["n_nao_1a1_descartada"],
     }
+
+
+# Aliases legados (carimbo / GT)
+def materialize_ouro_1a1(*args, **kwargs):
+    """Alias de `materialize_gt_1a1` (nomenclatura antiga)."""
+    if "out_table" not in kwargs:
+        kwargs["out_table"] = "ouro_1a1"
+    counts = materialize_gt_1a1(*args, **kwargs)
+    counts["n_prata_descartada"] = counts["n_nao_1a1_descartada"]
+    return counts
+
+
+def stamp_censo_cpf_from_ouro(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    table: str,
+    ouro_table: str = "ouro_1a1",
+) -> int:
+    """Alias de `stamp_censo_cpf_from_cohort` (nomenclatura antiga)."""
+    return stamp_censo_cpf_from_cohort(
+        con, table=table, cohort_cpf_table=ouro_table
+    )
 
 
 def materialize_cluster_composicao(
@@ -880,8 +985,10 @@ def require_tables(
     parquet_map: dict[str, Path] | None = None,
 ) -> None:
     parquet_map = parquet_map or {
-        "registro_unificado": REGISTRO_UNIFICADO,
-        TABELA_LIMPA: REGISTRO_LIMPO,
+        TABELA_CENSO_REGISTROS: CENSO_REGISTROS,
+        TABELA_CPF_REGISTROS: CPF_REGISTROS,
+        TABELA_CENSO_LIMPA: CENSO_LIMPO,
+        TABELA_CPF_LIMPA: CPF_LIMPO,
     }
     missing: list[str] = []
     for table in tables:

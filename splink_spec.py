@@ -5,8 +5,8 @@ from __future__ import annotations
 # Colunas de cada regra OR. Spec vigente = 02_treinar (predição).
 # 02: block_on(*cols). 03: blocking_rules_or_sql() no WHERE dos pares distintos.
 # Sexo só na regra sem nome DOB+UF (parte o bloco largo). Não entra nas regras com nome.
-# cpf_norm NÃO entra aqui: só prior/EM no 02. No Censo a coluna só existe na ouro 1:1;
-# incluí-la na predição faria a ouro sempre candidata e o 03 circularia.
+# cpf_norm NÃO entra aqui: só prior/EM no 02. No Censo a coluna vem da coorte;
+# incluí-la na predição faria a GT sempre candidata e o 03 circularia.
 BLOCKING_RULE_COLUMNS: tuple[tuple[str, ...], ...] = (
     ("nome_completo_phon",),
     ("primeiro_nome_phon", "ultimo_nome_phon", "ano_nascimento"),
