@@ -68,9 +68,14 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 
 Do NB00b em diante o Splink consome `censo_limpo` ∪ `cpf_limpo` via `materialize_splink_input` (view `splink_input`). Sem `registro_unificado` / `registro_limpo` empilhados.
 
-O `03_avaliar` usa `splink_predictions.parquet` e `splink_clusters.parquet`. `predict()` no `02b_aplicar` gera pares ≥0,5; **clustering, métricas e atribuição usam `THRESHOLD_AVALIACAO`** (default 0,95). Se o JSON não existir, o `02b` falha apontando o notebook de treino — não retreina sozinho. O JSON só é recarregado no 03 para o diagnóstico opcional (curva/waterfall). O 04 não depende das células do 03; gera `splink_atribuicao.parquet`.
+`predict()` no `02b_aplicar` gera pares ≥0,5 (opcionalmente com
+`PREDICT_NUM_CHUNKS_LEFT` / `PREDICT_NUM_CHUNKS_RIGHT`); export via
+`SplinkDataFrame.to_parquet` (sem materializar tudo em pandas). **Clustering,
+métricas e atribuição usam `THRESHOLD_AVALIACAO`** (default 0,95). Se o JSON não existir, o `02b` falha apontando o notebook de treino — não retreina sozinho. O JSON só é recarregado no 03 para o diagnóstico opcional (curva/waterfall). O 04 não depende das células do 03; gera `splink_atribuicao.parquet`.
 
-**1ª passada do modelo (`02_treinar`):** sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,92. DOB: `data_nascimento` e partes (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) com Null → Exact → Damerau-Levenshtein ≤ 1 → Else. TF só na data completa e no ano (mês tem 12 valores, dia 31). Data completa exact implica ano+mês+dia exact — o EM ainda estima, mas os pesos se sobrepõem um pouco, como nome completo + partes. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra numa regra de predição sem nome (DOB+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
+**1ª passada do modelo (`02_treinar`):** comparisons e settings em
+[`splink_spec.py`](splink_spec.py) (`build_comparisons` / `build_settings`); o
+notebook orquestra profile, EM e gravação do JSON. Sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes fonéticos: exact + Jaro-Winkler 0,95 e 0,92. DOB: `data_nascimento` e partes (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) com Null → Exact → Damerau-Levenshtein ≤ 1 → Else. TF só na data completa e no ano (mês tem 12 valores, dia 31). Data completa exact implica ano+mês+dia exact — o EM ainda estima, mas os pesos se sobrepõem um pouco, como nome completo + partes. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra numa regra de predição sem nome (DOB+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** refaz só filtro UF/município.
 
@@ -104,7 +109,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 - Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
 - **`idade`:** Censo via `PECP0401`; CPF = anos completos em `DATA_REFERENCIA_IDADE` ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo
-- Fonética: `*_phon` (substituições PT-BR)
+- Fonética: `*_phon` (substituições PT-BR; `Ç`→`S` / `Ñ`→`NH` antes do ASCII; `TH`/`RH`). Comparação experimental em [`fonetica_luis.py`](fonetica_luis.py) / [`notebooks/compare_fonetica.ipynb`](notebooks/compare_fonetica.ipynb).
 
 ### Idade
 

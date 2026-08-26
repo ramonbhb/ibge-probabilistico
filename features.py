@@ -30,6 +30,8 @@ except ImportError:
         text = str(text).upper().strip()
         if text in {"", "NAN", "NONE", "NULL"}:
             return ""
+        # Ç/Ñ antes do ASCII — senão viram C/N e perdem o valor fonético.
+        text = text.replace("Ç", "S").replace("Ñ", "NH")
         text = strip_accents(text)
         text = re.sub(r"[^A-Z0-9\s]", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
@@ -91,6 +93,19 @@ PLACEHOLDERS_NOME: tuple[str, ...] = (
 TERMOS_RUIDO_NOME: tuple[str, ...] = PARTICULAS_NOME + PLACEHOLDERS_NOME
 
 
+def _pt_pre_ascii(text: str) -> str:
+    """Ç→S e Ñ→NH antes do strip de acentos (senão viram C/N)."""
+    if not text:
+        return ""
+    return (
+        str(text)
+        .replace("Ç", "S")
+        .replace("ç", "S")
+        .replace("Ñ", "NH")
+        .replace("ñ", "NH")
+    )
+
+
 def _strip_noise_terms(text: str) -> str:
     """Remove partículas e placeholders por replace com espaço ao redor."""
     if not text:
@@ -103,16 +118,19 @@ def _strip_noise_terms(text: str) -> str:
 
 def clean_name(text) -> str | None:
     """Normaliza e remove partículas/placeholders; vazio vira None."""
-    norm = normalize_text(text)
+    # Pré-processa mesmo quando normalize_text vem do ibge_common.
+    norm = normalize_text(_pt_pre_ascii(text) if text is not None else text)
     if not norm:
         return None
     limpo = _strip_noise_terms(norm)
     return limpo if limpo else None
 
 
+# Ordem: dígrafos longos antes de H solto; GUI/GUE e QUI/QUE antes do soft G/C.
 _PHONETIC_REPLACEMENTS = [
     ("PH", "F"), ("Y", "I"), ("W", "V"), ("CK", "K"), ("SCH", "X"),
-    ("SH", "X"), ("CH", "X"), ("LH", "L"), ("NH", "N"), ("GUI", "GI"),
+    ("SH", "X"), ("CH", "X"), ("TH", "T"), ("RH", "R"),
+    ("LH", "L"), ("NH", "N"), ("GUI", "GI"),
     ("GUE", "GE"), ("QUI", "KI"), ("QUE", "KE"), ("SS", "S"),
     ("XC", "S"), ("XS", "S"), ("TS", "S"), ("TZ", "S"), ("Z", "S"), ("H", ""),
 ]
@@ -123,8 +141,8 @@ def _dedupe_consecutive(token: str) -> str:
 
 
 def br_phonetic_basic_token(token: str) -> str:
-    """Substituições fonéticas PT-BR."""
-    token = normalize_text(token)
+    """Substituições fonéticas PT-BR (ortográficas; sem epêntese/finais falados)."""
+    token = normalize_text(_pt_pre_ascii(token) if token is not None else token)
     if not token:
         return ""
     for a, b in _PHONETIC_REPLACEMENTS:
@@ -226,8 +244,10 @@ def normalize_cep(cep) -> str:
 def normalize_text_sql(col: str) -> str:
     """normalize_text() em SQL: maiúsculas, sem acento, só A-Z0-9 e espaço simples."""
     texto = f"trim(upper(CAST({col} AS VARCHAR)))"
+    # Ç/Ñ antes de strip_accents (senão Ç→C e Ñ→N).
+    texto_pt = f"replace(replace({texto}, 'Ç', 'S'), 'Ñ', 'NH')"
     limpo = (
-        f"regexp_replace(regexp_replace(strip_accents({texto}), "
+        f"regexp_replace(regexp_replace(strip_accents({texto_pt}), "
         f"'[^A-Z0-9\\s]', ' ', 'g'), '\\s+', ' ', 'g')"
     )
     return (

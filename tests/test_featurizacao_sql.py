@@ -145,6 +145,13 @@ def test_clean_name_particulas_e_placeholders(nome: str, esperado: str | None) -
     assert clean_name(nome) == esperado
 
 
+def test_cedilha_e_th_na_fonetica() -> None:
+    """Ç→S (não C→K); TH→T antes de remover H."""
+    assert full_name_phon_basic(clean_name("ASSUNÇÃO") or "") == "ASUNSAO"
+    assert full_name_phon_basic(clean_name("THEODORO") or "") == "TEODORO"
+    assert full_name_phon_basic(clean_name("RHUAN") or "") == "RUAN"
+
+
 def test_nome_meio_phon_composto() -> None:
     ref = referencia_python("JOSE MARIA HELENA SILVA")
     assert ref["nome_meio"] == "MARIA HELENA"

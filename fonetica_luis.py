@@ -1,7 +1,7 @@
-"""Fonética alternativa (Luis) — para comparar com features.br_phonetic_basic_token.
+"""Fonética alternativa (Luis) — experimental, para comparar com features.py.
 
-Arquivo original veio com encoding quebrado; Ç→S e Ñ→NH reconstituídos a partir
-dos comentários ("cedilha e ñ antes de remover acentos").
+Diferencial vs produção: regras “faladas” (S entre vogais → Z, finais O→U/E→I/L→U/M→N,
+nasal M+cons→N, epêntese ^S+cons). Dígrafo/limpeza alinhados à produção.
 """
 
 from __future__ import annotations
@@ -9,77 +9,101 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from features import TERMOS_RUIDO_NOME
+
+_CONECTIVOS = set(TERMOS_RUIDO_NOME)
+
+_RE_NAO_LETRA = re.compile(r"[^A-Z\s]")
+_RE_ESPACOS = re.compile(r"\s+")
+_RE_M_CONS = re.compile(r"M([BCDFGHJKLMNPQRSTVWXZ])")
+_RE_C_SOFT = re.compile(r"C([EI])")
+_RE_G_SOFT = re.compile(r"G([EI])")
+_RE_S_VOGAL = re.compile(r"([AEIOU])S([AEIOU])")
+_RE_Z_FIM = re.compile(r"Z$")
+_RE_S_INICIO = re.compile(r"^S([BCDFGHJKLMNPQRSTVWXZ])")
+_RE_FINAL_O = re.compile(r"O$")
+_RE_FINAL_E = re.compile(r"E$")
+_RE_FINAL_L = re.compile(r"L$")
+_RE_FINAL_M = re.compile(r"M$")
+_RE_DEDUPE = re.compile(r"(.)\1+")
+
 
 def limpar(texto) -> str:
+    """Upper, Ç/Ñ, ASCII, só letras, remove partículas/placeholders."""
     if not isinstance(texto, str):
         return ""
 
     texto = texto.upper()
+    texto = texto.replace("Ç", "S").replace("Ñ", "NH")
+    texto = (
+        unicodedata.normalize("NFKD", texto)
+        .encode("ASCII", "ignore")
+        .decode("utf-8")
+    )
+    texto = _RE_NAO_LETRA.sub(" ", texto)
+    texto = _RE_ESPACOS.sub(" ", texto).strip()
+    if not texto:
+        return ""
 
-    conectivos = {"E", "DE", "DO", "DA", "DOS", "DAS"}
+    palavras = [p for p in texto.split() if p not in _CONECTIVOS]
+    return " ".join(palavras)
 
-    # Remove pontuação (mantém letras, dígitos e espaço)
-    texto = re.sub(r"[^\w\s]", "", texto)
 
-    palavras = texto.split()
-    palavras_filtradas = [p for p in palavras if p not in conectivos]
-    return " ".join(palavras_filtradas)
+def _fonetica_token(p: str) -> str:
+    p = p.replace("Y", "I")
+    for a, b in (
+        ("SCH", "X"),
+        ("SH", "X"),
+        ("CH", "X"),
+        ("PH", "F"),
+        ("TH", "T"),
+        ("RH", "R"),
+        ("WI", "UI"),
+        ("W", "V"),
+        ("CK", "K"),
+        ("QUE", "KE"),
+        ("QUI", "KI"),
+        ("QU", "K"),
+        ("GUI", "GI"),
+        ("GUE", "GE"),
+        ("NH", "N"),
+        ("LH", "L"),
+    ):
+        p = p.replace(a, b)
+
+    p = _RE_M_CONS.sub(r"N\1", p)
+
+    if p.startswith("H"):
+        p = p[1:]
+    p = _RE_C_SOFT.sub(r"S\1", p)
+    p = p.replace("C", "K")
+    p = _RE_G_SOFT.sub(r"J\1", p)
+    p = _RE_S_VOGAL.sub(r"\1Z\2", p)
+    p = p.replace("SS", "S")
+    p = _RE_Z_FIM.sub("S", p)
+
+    # Dedupe antes da epêntese — evita FILIPIPI a partir de PHILIPPE.
+    p = _RE_DEDUPE.sub(r"\1", p)
+
+    # Epêntese só no S inicial + consoante (sem regra de cluster no meio).
+    p = _RE_S_INICIO.sub(r"IS\1", p)
+
+    p = _RE_FINAL_O.sub("U", p)
+    p = _RE_FINAL_E.sub("I", p)
+    p = _RE_FINAL_L.sub("U", p)
+    p = _RE_FINAL_M.sub("N", p)
+
+    p = _RE_DEDUPE.sub(r"\1", p)
+    return p
 
 
 def fonetica(nome) -> str:
     nome = limpar(nome)
-
-    # Cedilha e ñ antes de remover acentos (já em maiúsculo)
-    nome = nome.replace("Ç", "S")
-    nome = nome.replace("Ñ", "NH")
-
-    nome = (
-        unicodedata.normalize("NFKD", nome)
-        .encode("ASCII", "ignore")
-        .decode("utf-8")
-    )
-
-    nome = re.sub(r"[-_]", " ", nome)
-    nome = re.sub(r"[^A-Z\s]", "", nome)
-
-    resultado: list[str] = []
+    if not nome:
+        return ""
+    resultado = []
     for p in nome.split():
-        p = re.sub(r"Y", "I", p)
-        p = re.sub(r"SCH", "X", p)
-        p = re.sub(r"SH", "X", p)
-        p = re.sub(r"CH", "X", p)
-        p = re.sub(r"PH", "F", p)
-        p = re.sub(r"TH", "T", p)
-        p = re.sub(r"RH", "R", p)
-        p = re.sub(r"WI", "UI", p)
-        p = re.sub(r"W", "V", p)
-        p = re.sub(r"CK", "K", p)
-        p = re.sub(r"QU", "K", p)
-
-        # Nasalização: M + consoante → N + consoante
-        p = re.sub(r"M([BCDFGHJKLMNPQRSTVWXZ])", r"N\1", p)
-
-        p = re.sub(r"^H", "", p)
-        p = re.sub(r"C([EI])", r"S\1", p)
-        p = re.sub(r"C", "K", p)
-        p = re.sub(r"G([EI])", r"J\1", p)
-        p = re.sub(r"([AEIOU])S([AEIOU])", r"\1Z\2", p)
-        p = re.sub(r"SS", "S", p)
-        p = re.sub(r"Z$", "S", p)
-
-        # I epentético
-        p = re.sub(r"^S([BCDFGHJKLMNPQRSTVWXZ])", r"IS\1", p)
-        p = re.sub(r"([BDPTKVGF])([BDPTKVGMNC])", r"\1I\2", p)
-        p = re.sub(r"([BCDFGJKPTVXZ])$", r"\1I", p)
-
-        # Finais
-        p = re.sub(r"O$", "U", p)
-        p = re.sub(r"E$", "I", p)
-        p = re.sub(r"L$", "U", p)
-        p = re.sub(r"M$", "N", p)
-
-        p = re.sub(r"(.)\1+", r"\1", p)
-        if p:
-            resultado.append(p)
-
+        out = _fonetica_token(p)
+        if out:
+            resultado.append(out)
     return " ".join(resultado)

@@ -79,6 +79,18 @@ SEXO_VALIDOS = ("M", "F")
 # Override: export THRESHOLD_AVALIACAO=0.98
 THRESHOLD_AVALIACAO = float(os.environ.get("THRESHOLD_AVALIACAO", "0.99"))
 
+# Chunks opcionais do predict() Splink (volume grande). None = default da lib.
+# Override: export PREDICT_NUM_CHUNKS_LEFT=4 PREDICT_NUM_CHUNKS_RIGHT=4
+def _optional_positive_int(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return None
+    return int(raw)
+
+
+PREDICT_NUM_CHUNKS_LEFT = _optional_positive_int("PREDICT_NUM_CHUNKS_LEFT")
+PREDICT_NUM_CHUNKS_RIGHT = _optional_positive_int("PREDICT_NUM_CHUNKS_RIGHT")
+
 
 def set_filtros(
     *,
