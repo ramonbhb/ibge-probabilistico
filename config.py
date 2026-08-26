@@ -181,6 +181,7 @@ SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
 METRICAS_AVALIACAO = OUTPUT_DIR / "metricas_avaliacao.csv"
 METRICAS_SWEEP = OUTPUT_DIR / "metricas_sweep.csv"
 METRICAS_ATRIBUICAO = OUTPUT_DIR / "metricas_atribuicao.csv"
+METRICAS_RESIDUAL = OUTPUT_DIR / "metricas_residual.csv"
 SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
 MODELS_DIR = PROB_DIR / "models"
 
