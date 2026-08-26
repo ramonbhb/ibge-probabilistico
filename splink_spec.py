@@ -10,7 +10,8 @@ from typing import Any
 
 # Colunas de cada regra OR. Spec vigente = 02_treinar (predição).
 # 02: block_on(*cols). 03: blocking_rules_or_sql() no WHERE dos pares distintos.
-# Sexo só na regra sem nome DOB+UF (parte o bloco largo). Não entra nas regras com nome.
+# Sexo: DOB+UF (parte o bloco sem nome) e último+mês+dia (aperta o bloco largo).
+# Não entra nas regras que já têm primeiro+último.
 # cpf_norm NÃO entra aqui: só prior/EM no 02. No Censo a coluna vem da coorte;
 # incluí-la na predição faria a GT sempre candidata e o 03 circularia.
 BLOCKING_RULE_COLUMNS: tuple[tuple[str, ...], ...] = (
@@ -22,7 +23,7 @@ BLOCKING_RULE_COLUMNS: tuple[tuple[str, ...], ...] = (
     ("ultimo_nome_phon", "data_nascimento"),
     ("primeiro_nome_phon", "mes_nascimento", "dia_nascimento"),
     ("primeiro_nome_phon", "mes_nascimento", "ano_nascimento"),
-    ("ultimo_nome_phon", "mes_nascimento", "dia_nascimento"),
+    ("ultimo_nome_phon", "mes_nascimento", "dia_nascimento", "sexo"),
     ("ultimo_nome_phon", "mes_nascimento", "ano_nascimento"),
     ("data_nascimento", "cep"),
     ("data_nascimento", "uf", "sexo"),
@@ -55,23 +56,45 @@ def build_blocking_rules() -> list[Any]:
     return [block_on(*cols) for cols in BLOCKING_RULE_COLUMNS]
 
 
-def dob_comparison(col: str, *, term_frequency_adjustments: bool = False):
-    """Null → Exact → Damerau-Levenshtein ≤ 1 → Else."""
+def data_nascimento_comparison():
+    """Um eixo de data: Null → Exact+TF → DL≤1 → mês e dia iguais → ELSE m=1e-6.
+
+    Não usa NullLevel('data_nascimento'): isso abortaria o score quando o ano
+    foi anulado e mês/dia restaram. ELSE fixo (~−20 bits) para datas que
+    discordam de verdade.
+    """
     import splink.comparison_level_library as cll
     import splink.comparison_library as cl
 
+    null_sql = (
+        "(data_nascimento_l IS NULL OR data_nascimento_r IS NULL) AND "
+        "(mes_nascimento_l IS NULL OR mes_nascimento_r IS NULL OR "
+        "dia_nascimento_l IS NULL OR dia_nascimento_r IS NULL)"
+    )
+    mes_dia_sql = (
+        "mes_nascimento_l = mes_nascimento_r AND "
+        "dia_nascimento_l = dia_nascimento_r AND "
+        "mes_nascimento_l IS NOT NULL AND dia_nascimento_l IS NOT NULL"
+    )
     return cl.CustomComparison(
         comparison_levels=[
-            cll.NullLevel(col),
-            cll.ExactMatchLevel(col, term_frequency_adjustments=term_frequency_adjustments),
-            cll.DamerauLevenshteinLevel(col, 1),
-            cll.ElseLevel(),
+            cll.CustomLevel(null_sql, label_for_charts="Null data e mes/dia").configure(
+                is_null_level=True
+            ),
+            cll.ExactMatchLevel("data_nascimento", term_frequency_adjustments=True),
+            cll.DamerauLevenshteinLevel("data_nascimento", 1),
+            cll.CustomLevel(mes_dia_sql, label_for_charts="Mes e dia iguais"),
+            cll.ElseLevel().configure(
+                m_probability=1e-6,
+                fix_m_probability=True,
+            ),
         ],
+        output_column_name="data_nascimento",
     )
 
 
 def build_comparisons() -> list[Any]:
-    """Comparisons da 1ª passada (sem nome_mae*, sem sexo, sem CEP, sem CPF no score)."""
+    """Comparisons da 1ª passada (sem nome_mae*, sem nome_meio, sem sexo/CEP/CPF)."""
     import splink.comparison_level_library as cll
     import splink.comparison_library as cl
 
@@ -83,15 +106,9 @@ def build_comparisons() -> list[Any]:
             "primeiro_nome_phon", jaro_winkler_thresholds=[0.95, 0.92]
         ).configure(term_frequency_adjustments=True),
         cl.NameComparison(
-            "nome_meio_phon", jaro_winkler_thresholds=[0.95, 0.92]
-        ).configure(term_frequency_adjustments=True),
-        cl.NameComparison(
             "ultimo_nome_phon", jaro_winkler_thresholds=[0.95, 0.92]
         ).configure(term_frequency_adjustments=True),
-        dob_comparison("data_nascimento", term_frequency_adjustments=True),
-        dob_comparison("ano_nascimento", term_frequency_adjustments=True),
-        dob_comparison("mes_nascimento"),
-        dob_comparison("dia_nascimento"),
+        data_nascimento_comparison(),
         cl.CustomComparison(
             comparison_levels=[
                 cll.NullLevel("idade"),
@@ -99,6 +116,7 @@ def build_comparisons() -> list[Any]:
                 cll.AbsoluteDifferenceLevel("idade", 1),
                 cll.ElseLevel(),
             ],
+            output_column_name="idade",
         ),
         cl.ExactMatch("uf").configure(term_frequency_adjustments=True),
     ]

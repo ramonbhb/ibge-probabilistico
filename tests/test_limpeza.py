@@ -15,10 +15,15 @@ from config import (  # noqa: E402
     ANO_OBITO_CORTE,
     ANO_REFERENCIA_CENSO,
     SEXO_VALIDOS,
+    SPLINK_INPUT_VIEW,
+    ano_nascimento_sql,
     sem_nome_sql,
     cep_valido_sql,
+    dia_nascimento_sql,
     dob_valida_sql,
     limpeza_columns_sql,
+    materialize_splink_input,
+    mes_nascimento_sql,
     obito_antes_do_censo_sql,
     sexo_valido_sql,
     texto_nao_vazio_sql,
@@ -134,6 +139,23 @@ def test_dob_valida(con, valor, esperado) -> None:
     assert escalar(con, dob_valida_sql("v"), valor) == esperado
 
 
+def test_mes_dia_sobrevivem_ano_invalido(con) -> None:
+    """ISO 1850: data e ano nulos; mês e dia saem da string crua."""
+    iso = "1850-05-07"
+    assert escalar(con, dob_valida_sql("v"), iso) is None
+    assert escalar(con, ano_nascimento_sql("v"), iso) is None
+    assert escalar(con, mes_nascimento_sql("v"), iso) == "05"
+    assert escalar(con, dia_nascimento_sql("v"), iso) == "07"
+
+
+def test_partes_de_data_validada(con) -> None:
+    iso = "1990-01-02"
+    assert escalar(con, dob_valida_sql("v"), iso) == iso
+    assert escalar(con, ano_nascimento_sql("v"), iso) == "1990"
+    assert escalar(con, mes_nascimento_sql("v"), iso) == "01"
+    assert escalar(con, dia_nascimento_sql("v"), iso) == "02"
+
+
 # --- CEP ---------------------------------------------------------------------
 
 
@@ -231,7 +253,8 @@ def test_colunas_estruturais_e_numericas_intactas() -> None:
     cols = limpeza_columns_sql(tipos_registro())
     for nome in ("unique_id", "origem", "cpf_norm", "person_id_censo", "ano_obito"):
         assert cols[nome] == nome, f"{nome} não deveria ser transformada"
-    assert set(cols) == set(tipos_registro()), "nenhuma coluna pode sumir"
+    assert set(tipos_registro()) <= set(cols)
+    assert {"ano_nascimento", "mes_nascimento", "dia_nascimento"} <= set(cols)
 
 
 def test_nomes_entram_na_limpeza() -> None:
@@ -262,3 +285,55 @@ def test_idade_do_cpf_acompanha_a_data(con) -> None:
     assert linhas == [("cpf", None), ("cpf", 32), ("censo", 40)], (
         "idade do CPF deriva da data e cai junto; a do Censo vem de PECP0401"
     )
+
+
+def test_limpeza_materializa_mes_dia_com_ano_invalido(con) -> None:
+    cols = limpeza_columns_sql(tipos_registro())
+    con.execute(
+        """CREATE TABLE t AS SELECT * FROM (VALUES
+        ('1850-05-07'),
+        ('1990-01-02'),
+        ('nao-e-data')
+    ) v(data_nascimento)"""
+    )
+    linhas = con.execute(
+        f"""SELECT
+            {cols['data_nascimento']} AS data_nascimento,
+            {cols['ano_nascimento']} AS ano_nascimento,
+            {cols['mes_nascimento']} AS mes_nascimento,
+            {cols['dia_nascimento']} AS dia_nascimento
+        FROM t"""
+    ).fetchall()
+    assert linhas[0] == (None, None, "05", "07")
+    assert linhas[1] == ("1990-01-02", "1990", "01", "02")
+    assert linhas[2] == (None, None, None, None)
+
+
+def test_materialize_splink_input_nao_duplica_partes(con, monkeypatch) -> None:
+    """Se a limpa já tem mes/dia, a view não recalcula em cima da ISO nula."""
+    import config as cfg
+
+    monkeypatch.setattr(cfg, "TABELA_CENSO_LIMPA", "censo_limpo")
+    monkeypatch.setattr(cfg, "TABELA_CPF_LIMPA", "cpf_limpo")
+    schema = """
+        unique_id VARCHAR, origem VARCHAR, data_nascimento VARCHAR,
+        ano_nascimento VARCHAR, mes_nascimento VARCHAR, dia_nascimento VARCHAR
+    """
+    con.execute(f"CREATE TABLE censo_limpo ({schema})")
+    con.execute(f"CREATE TABLE cpf_limpo ({schema})")
+    con.execute(
+        "INSERT INTO censo_limpo VALUES "
+        "('c1', 'censo', NULL, NULL, '05', '07')"
+    )
+    con.execute(
+        "INSERT INTO cpf_limpo VALUES "
+        "('p1', 'cpf', NULL, NULL, '05', '07')"
+    )
+    materialize_splink_input(con, censo_table="censo_limpo", cpf_table="cpf_limpo")
+    cols = [r[0] for r in con.execute(f"DESCRIBE {SPLINK_INPUT_VIEW}").fetchall()]
+    assert cols.count("mes_nascimento") == 1
+    row = con.execute(
+        f"SELECT mes_nascimento, dia_nascimento, data_nascimento "
+        f"FROM {SPLINK_INPUT_VIEW} WHERE unique_id = 'c1'"
+    ).fetchone()
+    assert row == ("05", "07", None)

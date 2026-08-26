@@ -425,6 +425,46 @@ def dob_valida_sql(
     END"""
 
 
+def _iso_bruta_sql(col: str) -> str:
+    return f"NULLIF(TRIM(CAST({col} AS VARCHAR)), '')"
+
+
+def _parece_iso_sql(s: str) -> str:
+    """YYYY-MM-DD na forma (length ≥ 10 e hífens nas posições 5 e 8)."""
+    return (
+        f"({s} IS NOT NULL AND length({s}) >= 10 AND "
+        f"substr({s}, 5, 1) = '-' AND substr({s}, 8, 1) = '-')"
+    )
+
+
+def ano_nascimento_sql(col: str = "data_nascimento") -> str:
+    """Ano só da data validada (nulo se a ISO caiu fora da faixa)."""
+    d = dob_valida_sql(col)
+    return f"CASE WHEN ({d}) IS NULL THEN NULL ELSE substr({d}, 1, 4) END"
+
+
+def mes_nascimento_sql(col: str = "data_nascimento") -> str:
+    """Mês da ISO crua, mesmo com ano fora da faixa."""
+    s = _iso_bruta_sql(col)
+    mes = f"substr({s}, 6, 2)"
+    return f"""CASE
+        WHEN NOT {_parece_iso_sql(s)} THEN NULL
+        WHEN TRY_CAST({mes} AS INTEGER) BETWEEN 1 AND 12 THEN {mes}
+        ELSE NULL
+    END"""
+
+
+def dia_nascimento_sql(col: str = "data_nascimento") -> str:
+    """Dia da ISO crua, mesmo com ano fora da faixa."""
+    s = _iso_bruta_sql(col)
+    dia = f"substr({s}, 9, 2)"
+    return f"""CASE
+        WHEN NOT {_parece_iso_sql(s)} THEN NULL
+        WHEN TRY_CAST({dia} AS INTEGER) BETWEEN 1 AND 31 THEN {dia}
+        ELSE NULL
+    END"""
+
+
 def cep_valido_sql(col: str = "cep") -> str:
     """CEP ausente vira NULL.
 
@@ -473,6 +513,12 @@ def limpeza_columns_sql(colunas: dict[str, str]) -> dict[str, str]:
         out["idade"] = (
             f"CASE WHEN origem = 'cpf' THEN {idade_cpf_sql(dob)} ELSE idade END"
         )
+    # Partes da data: mês/dia da ISO crua (ano inválido ainda rende aniversário);
+    # ano só da data validada. Blocking e o nível mês+dia do Splink usam isto.
+    if "data_nascimento" in colunas:
+        out["ano_nascimento"] = ano_nascimento_sql("data_nascimento")
+        out["mes_nascimento"] = mes_nascimento_sql("data_nascimento")
+        out["dia_nascimento"] = dia_nascimento_sql("data_nascimento")
     return out
 
 
@@ -598,14 +644,22 @@ def materialize_splink_input(
             f"{TABELA_CENSO_LIMPA}/{TABELA_CPF_LIMPA} — "
             "sentinelas podem ainda estar no lugar. Rode o NB00b."
         )
+    partes = {"ano_nascimento", "mes_nascimento", "dia_nascimento"}
+    cols_censo = {r[0] for r in con.execute(f"DESCRIBE {censo}").fetchall()}
+    cols_cpf = {r[0] for r in con.execute(f"DESCRIBE {cpf}").fetchall()}
+    ja_tem_partes = partes <= cols_censo and partes <= cols_cpf
+    if ja_tem_partes:
+        select_sql = "SELECT * FROM unioned"
+    else:
+        select_sql = f"SELECT t.*, {_DOB_PARTS_SQL} FROM unioned t"
     con.execute(f"""
     CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
-    SELECT t.*, {_DOB_PARTS_SQL}
-    FROM (
+    WITH unioned AS (
         SELECT * FROM {censo}
         UNION ALL
         SELECT * FROM {cpf}
-    ) t
+    )
+    {select_sql}
     """)
     print(f"{SPLINK_INPUT_VIEW} → {censo} ∪ {cpf}")
     return censo, cpf
