@@ -16,13 +16,15 @@ Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_
 Recorte geográfico e limpeza mudam a cada rodada e ficam versionados, no bloco `PARÂMETROS DE ANÁLISE` no topo do arquivo:
 
 ```python
-FILTRO_UF: str | int | None = None            # ex.: 42 (SC); None = nacional
-FILTRO_MUNICIPIO: str | int | None = 2111300  # IBGE 7 díg.; None = sem filtro
+FILTRO_UF = None            # ex.: 42 (SC) ou [21, 22]; None = nacional
+FILTRO_MUNICIPIO = 2111300  # ex.: 2111300 ou [2111300, 2105302]; None = sem filtro
 ANO_OBITO_CORTE = 2023                        # ano_obito <= corte sai (NB00b); 0 = não remove ninguém
 DATA_REFERENCIA_IDADE = "2022-08-01"           # idade CPF = anos completos nesta data
 ANO_NASCIMENTO_MIN = 1900                     # ano fora de [MIN, 2022] anula a data
 SEXO_VALIDOS = ("M", "F")                     # fora daqui o sexo vira NULL
 ```
+
+Cada eixo aceita **escalar ou lista**. O recorte usual é **só um** (UF *ou* município). Se os dois estiverem preenchidos, a cláusula é AND (como antes).
 
 `ANO_OBITO_CORTE = 0` desliga o filtro de óbito (a regra exige `ano > 0` e `ano <= corte`). Subir o corte (ex. 2030) remove **mais** gente, não desliga.
 Corte de clustering/métricas: `THRESHOLD_AVALIACAO` (default `0.95`), também sobrescreve por `export THRESHOLD_AVALIACAO=0.98`.
@@ -33,7 +35,8 @@ Para sobrescrever o filtro só na sessão atual de um notebook, use `config.set_
 
 ```python
 import config
-config.set_filtros(municipio=2111300)   # None desliga o filtro
+config.set_filtros(uf=[21, 22])                 # mais de um estado
+config.set_filtros(municipio=[2111300, 2105302])  # None desliga o eixo
 print(config.FILTRO_UF, config.FILTRO_MUNICIPIO)
 ```
 
@@ -63,8 +66,10 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | Carrega o JSON (não retreina) → `predict(0,5)` + cluster `THRESHOLD_AVALIACAO` |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Score no par (`recall_par_ouro`, `fp_amostra`), erros, sweep de threshold e recall no cluster (`recall_cluster_ouro`) |
 | [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Lista 1 CPF por Censo (greedy, fora de mega-cluster) e `recall_atribuicao` vs ouro |
+| [`05_avaliar_residual.ipynb`](notebooks/05_avaliar_residual.ipynb) | Recortes abaixo de 0,99, clusters ≠ 1_para_1, nome+DOB |
+| [`06_atribuir_peso.ipynb`](notebooks/06_atribuir_peso.ipynb) | 1 CPF por Censo (maior weight no corte `THRESHOLD_AVALIACAO`); empate de weight no CPF descarta |
 
-**Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` atribuir.
+**Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` atribuir → `05` residual → `06` peso.
 
 Do NB00b em diante o Splink consome `censo_limpo` ∪ `cpf_limpo` via `materialize_splink_input` (view `splink_input`). Sem `registro_unificado` / `registro_limpo` empilhados.
 

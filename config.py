@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +15,11 @@ from features import normalize_date_sql
 # um valor válido para FILTRO_UF/FILTRO_MUNICIPIO.
 _UNSET: Any = object()
 
+FiltroGeo = str | int | float | Sequence[str | int | float] | None
+
 
 def normalize_uf_filtro(filtro: str | int | float | None) -> str | None:
-    """Normaliza FILTRO_UF para string SQL (aceita int/float do notebook)."""
+    """Normaliza um código de UF para string SQL (aceita int/float do notebook)."""
     if filtro is None:
         return None
     if isinstance(filtro, bool):
@@ -30,7 +33,7 @@ def normalize_uf_filtro(filtro: str | int | float | None) -> str | None:
 
 
 def normalize_municipio_filtro(filtro: str | int | float | None) -> str | None:
-    """Normaliza FILTRO_MUNICIPIO para código IBGE 7 dígitos."""
+    """Normaliza um município para código IBGE 7 dígitos."""
     if filtro is None:
         return None
     if isinstance(filtro, bool):
@@ -41,16 +44,59 @@ def normalize_municipio_filtro(filtro: str | int | float | None) -> str | None:
     return digits.zfill(7)[-7:]
 
 
+def _iter_filtro_valores(filtro: FiltroGeo) -> tuple[Any, ...]:
+    if filtro is None or isinstance(filtro, bool):
+        return ()
+    if isinstance(filtro, (str, bytes)) or not isinstance(filtro, Sequence):
+        return (filtro,)
+    return tuple(filtro)
+
+
+def normalize_uf_lista(filtro: FiltroGeo) -> tuple[str, ...] | None:
+    """None | escalar | sequência → tupla de UFs (2 dígitos), sem duplicata."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in _iter_filtro_valores(filtro):
+        uf = normalize_uf_filtro(item)
+        if uf and uf not in seen:
+            seen.add(uf)
+            out.append(uf)
+    return tuple(out) or None
+
+
+def normalize_municipio_lista(filtro: FiltroGeo) -> tuple[str, ...] | None:
+    """None | escalar | sequência → tupla de municípios IBGE 7 dígitos."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in _iter_filtro_valores(filtro):
+        mun = normalize_municipio_filtro(item)
+        if mun and mun not in seen:
+            seen.add(mun)
+            out.append(mun)
+    return tuple(out) or None
+
+
+def _sql_eq_or_in(expr: str, valores: tuple[str, ...]) -> str:
+    escaped = [v.replace("'", "''") for v in valores]
+    if len(escaped) == 1:
+        return f"{expr} = '{escaped[0]}'"
+    listed = ", ".join(f"'{v}'" for v in escaped)
+    return f"{expr} IN ({listed})"
+
+
 # =============================================================================
 # PARÂMETROS DE ANÁLISE — ajuste aqui a cada rodada
 # =============================================================================
 
 # Recorte geográfico. None = sem filtro (base nacional).
-FILTRO_UF: str | int | None = None            # ex.: 42 (SC)
-FILTRO_MUNICIPIO: str | int | None = 2111300  # IBGE 7 díg.; None = sem filtro
+# Um eixo por vez (UF *ou* município). Cada um aceita escalar ou lista.
+# Se os dois estiverem preenchidos, a cláusula é AND (como antes).
+# Região Sul: PR 41, SC 42, RS 43. (MA completo seria FILTRO_UF = 21)
+FILTRO_UF: FiltroGeo = [41, 42, 43]
+FILTRO_MUNICIPIO: FiltroGeo = None
 
-FILTRO_UF = normalize_uf_filtro(FILTRO_UF)
-FILTRO_MUNICIPIO = normalize_municipio_filtro(FILTRO_MUNICIPIO)
+FILTRO_UF = normalize_uf_lista(FILTRO_UF)
+FILTRO_MUNICIPIO = normalize_municipio_lista(FILTRO_MUNICIPIO)
 
 # --- Limpeza (NB00b) ---------------------------------------------------------
 
@@ -94,20 +140,22 @@ PREDICT_NUM_CHUNKS_RIGHT = _optional_positive_int("PREDICT_NUM_CHUNKS_RIGHT")
 
 def set_filtros(
     *,
-    uf: str | int | float | None = _UNSET,
-    municipio: str | int | float | None = _UNSET,
-) -> tuple[str | None, str | None]:
+    uf: FiltroGeo | Any = _UNSET,
+    municipio: FiltroGeo | Any = _UNSET,
+) -> tuple[tuple[str, ...] | None, tuple[str, ...] | None]:
     """Sobrescreve os filtros geográficos para a sessão atual.
 
     Use isto no notebook em vez de reatribuir FILTRO_UF/FILTRO_MUNICIPIO:
     `from config import FILTRO_UF` cria uma cópia do nome, e reatribuí-la não
     altera o estado lido pelas funções de filtro.
+
+    Aceita escalar ou lista: `set_filtros(uf=[21, 22])`.
     """
     global FILTRO_UF, FILTRO_MUNICIPIO
     if uf is not _UNSET:
-        FILTRO_UF = normalize_uf_filtro(uf)
+        FILTRO_UF = normalize_uf_lista(uf)
     if municipio is not _UNSET:
-        FILTRO_MUNICIPIO = normalize_municipio_filtro(municipio)
+        FILTRO_MUNICIPIO = normalize_municipio_lista(municipio)
     return FILTRO_UF, FILTRO_MUNICIPIO
 
 
@@ -182,6 +230,7 @@ METRICAS_AVALIACAO = OUTPUT_DIR / "metricas_avaliacao.csv"
 METRICAS_SWEEP = OUTPUT_DIR / "metricas_sweep.csv"
 METRICAS_ATRIBUICAO = OUTPUT_DIR / "metricas_atribuicao.csv"
 METRICAS_RESIDUAL = OUTPUT_DIR / "metricas_residual.csv"
+METRICAS_PESO = OUTPUT_DIR / "metricas_peso.csv"
 SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
 MODELS_DIR = PROB_DIR / "models"
 
@@ -298,28 +347,28 @@ def materialize_censo_cep_lookup(
     *,
     source_path: Path | None = None,
     target_table: str = "censo_cep_lookup",
-    filtro_uf: str | int | float | None = _UNSET,
-    filtro_municipio: str | int | float | None = _UNSET,
+    filtro_uf: FiltroGeo | Any = _UNSET,
+    filtro_municipio: FiltroGeo | Any = _UNSET,
 ) -> None:
     """Materializa lookup de CEP a partir de data_cep_uniq.csv (filtro UF e/ou município)."""
     path = (source_path or CENSO_CEP_ARQUIVO).expanduser()
     clauses: list[str] = []
-    uf = normalize_uf_filtro(FILTRO_UF if filtro_uf is _UNSET else filtro_uf)
-    if uf:
-        safe = uf.replace("'", "''")
+    ufs = normalize_uf_lista(FILTRO_UF if filtro_uf is _UNSET else filtro_uf)
+    if ufs:
         uf_col = f'c."{CEP_COL_UF}"'
-        clauses.append(
-            f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0') = '{safe}'"
+        uf_expr = (
+            f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0')"
         )
-    mun = normalize_municipio_filtro(
+        clauses.append(_sql_eq_or_in(uf_expr, ufs))
+    muns = normalize_municipio_lista(
         FILTRO_MUNICIPIO if filtro_municipio is _UNSET else filtro_municipio
     )
-    if mun:
-        safe_mun = mun.replace("'", "''")
+    if muns:
         mun_col = f'c."{CEP_COL_MUNICIPIO}"'
-        clauses.append(
-            f"lpad(regexp_replace(CAST({mun_col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0') = '{safe_mun}'"
+        mun_expr = (
+            f"lpad(regexp_replace(CAST({mun_col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0')"
         )
+        clauses.append(_sql_eq_or_in(mun_expr, muns))
     where_clause = " AND ".join(clauses) if clauses else "TRUE"
 
     con.execute(f"""
@@ -532,32 +581,32 @@ def sql_optional_col(alias: str, col: str | None, *, cast_varchar: bool = True) 
 
 def uf_filter_clause(
     uf_expr: str,
-    filtro: str | int | float | None = _UNSET,
+    filtro: FiltroGeo | Any = _UNSET,
 ) -> str:
-    uf = normalize_uf_filtro(FILTRO_UF if filtro is _UNSET else filtro)
-    if not uf:
+    ufs = normalize_uf_lista(FILTRO_UF if filtro is _UNSET else filtro)
+    if not ufs:
         return "TRUE"
-    safe = uf.replace("'", "''")
-    return f"{uf_expr} = '{safe}'"
+    return _sql_eq_or_in(uf_expr, ufs)
 
 
 def municipio_filter_clause(
     mun_expr: str,
-    filtro: str | int | float | None = _UNSET,
+    filtro: FiltroGeo | Any = _UNSET,
 ) -> str:
-    mun = normalize_municipio_filtro(FILTRO_MUNICIPIO if filtro is _UNSET else filtro)
-    if not mun:
+    muns = normalize_municipio_lista(
+        FILTRO_MUNICIPIO if filtro is _UNSET else filtro
+    )
+    if not muns:
         return "TRUE"
-    safe = mun.replace("'", "''")
-    return f"{mun_expr} = '{safe}'"
+    return _sql_eq_or_in(mun_expr, muns)
 
 
 def geo_filter_clause(
     uf_expr: str,
     mun_expr: str,
     *,
-    filtro_uf: str | int | float | None = _UNSET,
-    filtro_municipio: str | int | float | None = _UNSET,
+    filtro_uf: FiltroGeo | Any = _UNSET,
+    filtro_municipio: FiltroGeo | Any = _UNSET,
 ) -> str:
     """Combina filtros UF e município (AND). Município IBGE 7 díg. já inclui UF."""
     parts = [
