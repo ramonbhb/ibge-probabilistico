@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import duckdb
 
@@ -15,7 +15,7 @@ from features import normalize_date_sql
 # um valor válido para FILTRO_UF/FILTRO_MUNICIPIO.
 _UNSET: Any = object()
 
-FiltroGeo = str | int | float | Sequence[str | int | float] | None
+FiltroGeo = Union[str, int, float, Sequence[Union[str, int, float]], None]
 
 
 def normalize_uf_filtro(filtro: str | int | float | None) -> str | None:
