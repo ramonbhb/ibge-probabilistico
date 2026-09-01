@@ -35,19 +35,19 @@ Para sobrescrever o filtro só na sessão atual de um notebook, use `config.set_
 
 ```python
 import config
-config.set_filtros(uf=[21, 22])                 # mais de um estado
+config.set_filtros(uf=[21, 22])                 # mais de um estado → output em .../uf_21_22/
 config.set_filtros(municipio=[2111300, 2105302])  # None desliga o eixo
-print(config.FILTRO_UF, config.FILTRO_MUNICIPIO)
+print(config.FILTRO_UF, config.FILTRO_MUNICIPIO, config.OUTPUT_DIR)
 ```
 
-`from config import FILTRO_UF` copia o valor no momento do import; reatribuir essa cópia deixa o notebook exibindo o filtro novo enquanto as funções de filtro continuam usando o antigo.
+`from config import FILTRO_UF` copia o valor no momento do import; reatribuir essa cópia deixa o notebook exibindo o filtro novo enquanto as funções de filtro continuam usando o antigo. O mesmo vale para `OUTPUT_DIR`: depois de `set_filtros()`, use `config.OUTPUT_DIR`.
 
 ### Caminhos e recursos — variam por máquina
 
 Têm default em `config.py` e aceitam variável de ambiente:
 
 ```bash
-export OUTPUT_DIR=~/data/probabilistico_output
+export OUTPUT_DIR=~/data/probabilistico_output   # base; o recorte vira subdir (uf_41_42_43, nacional, …)
 export DUCKDB_THREADS=20           # Splink/DuckDB
 export DUCKDB_MEMORY_LIMIT=370GB   # Splink/DuckDB
 export THRESHOLD_AVALIACAO=0.99    # clustering 02b, métricas 03, atribuição 04
@@ -156,7 +156,7 @@ Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `sem_nome_sql`, 
 
 ## Saídas
 
-`~/data/probabilistico_output/`:
+`~/data/probabilistico_output/<recorte>/`, com `<recorte>` = slug do filtro (`uf_41_42_43`, `mun_2111300`, `nacional`). DuckDB, parquets, JSON e métricas ficam nesse subdiretório — rodadas de UFs diferentes não se sobrescrevem. A cópia versionada `models/splink_model.json` no repo é única (não é por recorte).
 
 | Arquivo | Origem |
 |---------|--------|

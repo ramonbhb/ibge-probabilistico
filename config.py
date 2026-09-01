@@ -138,6 +138,29 @@ PREDICT_NUM_CHUNKS_LEFT = _optional_positive_int("PREDICT_NUM_CHUNKS_LEFT")
 PREDICT_NUM_CHUNKS_RIGHT = _optional_positive_int("PREDICT_NUM_CHUNKS_RIGHT")
 
 
+def recorte_output_slug(
+    filtro_uf: FiltroGeo | Any = _UNSET,
+    filtro_municipio: FiltroGeo | Any = _UNSET,
+) -> str:
+    """Slug estável do recorte: uf_41_42_43, mun_2111300, ou nacional.
+
+    UFs e municípios entram ordenados, então [43, 41] e [41, 43] caem no
+    mesmo diretório. Sem filtro → `nacional`.
+    """
+    uf = FILTRO_UF if filtro_uf is _UNSET else normalize_uf_lista(filtro_uf)
+    mun = (
+        FILTRO_MUNICIPIO
+        if filtro_municipio is _UNSET
+        else normalize_municipio_lista(filtro_municipio)
+    )
+    parts: list[str] = []
+    if uf:
+        parts.append("uf_" + "_".join(sorted(uf)))
+    if mun:
+        parts.append("mun_" + "_".join(sorted(mun)))
+    return "_".join(parts) if parts else "nacional"
+
+
 def set_filtros(
     *,
     uf: FiltroGeo | Any = _UNSET,
@@ -150,12 +173,16 @@ def set_filtros(
     altera o estado lido pelas funções de filtro.
 
     Aceita escalar ou lista: `set_filtros(uf=[21, 22])`.
+    Também rebasa `OUTPUT_DIR` (e DuckDB/parquets) para
+    `OUTPUT_DIR_BASE / recorte_output_slug()`. `from config import OUTPUT_DIR`
+    continua uma cópia — use `config.OUTPUT_DIR` depois desta chamada.
     """
     global FILTRO_UF, FILTRO_MUNICIPIO
     if uf is not _UNSET:
         FILTRO_UF = normalize_uf_lista(uf)
     if municipio is not _UNSET:
         FILTRO_MUNICIPIO = normalize_municipio_lista(municipio)
+    refresh_output_paths()
     return FILTRO_UF, FILTRO_MUNICIPIO
 
 
@@ -163,14 +190,29 @@ def set_filtros(
 # CAMINHOS E RECURSOS — variam por máquina, aceitam variável de ambiente
 # =============================================================================
 #
-# OUTPUT_DIR, CENSO_DIR, CENSO_RAW_DIR, CENSO_CEP_ARQUIVO,
+# OUTPUT_DIR_BASE, OUTPUT_DIR (subdir do recorte), CENSO_DIR, CENSO_RAW_DIR,
 # CENSO_PESSOAS_ARQUIVO, CPF_ARQUIVO, COHORT_DIR, COHORT_DEDUP_ARQUIVO,
 # DUCKDB_TEMP_DIR, DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
 
 PROB_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = Path(
+OUTPUT_DIR_BASE = Path(
     os.environ.get("OUTPUT_DIR", Path.home() / "data/probabilistico_output")
 ).expanduser()
+OUTPUT_DIR: Path
+DUCKDB_ARQUIVO: Path
+CENSO_REGISTROS: Path
+CPF_REGISTROS: Path
+CENSO_LIMPO: Path
+CPF_LIMPO: Path
+SPLINK_MODEL_JSON: Path
+SPLINK_PREDICTIONS: Path
+SPLINK_CLUSTERS: Path
+METRICAS_AVALIACAO: Path
+METRICAS_SWEEP: Path
+METRICAS_ATRIBUICAO: Path
+METRICAS_RESIDUAL: Path
+METRICAS_PESO: Path
+SPLINK_ATRIBUICAO: Path
 
 CENSO_DIR = Path(
     os.environ.get("CENSO_DIR", Path.home() / "singed/bases/bronze/censo")
@@ -209,29 +251,41 @@ COHORT_DEDUP_ARQUIVO = Path(
     os.environ.get("COHORT_DEDUP_ARQUIVO", COHORT_DIR / "cohort_dedup.parquet")
 ).expanduser()
 
-DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
+
+def refresh_output_paths() -> Path:
+    """OUTPUT_DIR = OUTPUT_DIR_BASE / slug do filtro; rebind de DuckDB e parquets."""
+    global OUTPUT_DIR, DUCKDB_ARQUIVO, CENSO_REGISTROS, CPF_REGISTROS
+    global CENSO_LIMPO, CPF_LIMPO, SPLINK_MODEL_JSON, SPLINK_PREDICTIONS
+    global SPLINK_CLUSTERS, METRICAS_AVALIACAO, METRICAS_SWEEP
+    global METRICAS_ATRIBUICAO, METRICAS_RESIDUAL, METRICAS_PESO
+    global SPLINK_ATRIBUICAO
+    OUTPUT_DIR = OUTPUT_DIR_BASE / recorte_output_slug()
+    DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
+    CENSO_REGISTROS = OUTPUT_DIR / "censo_registros.parquet"
+    CPF_REGISTROS = OUTPUT_DIR / "cpf_registros.parquet"
+    CENSO_LIMPO = OUTPUT_DIR / "censo_limpo.parquet"
+    CPF_LIMPO = OUTPUT_DIR / "cpf_limpo.parquet"
+    SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
+    SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
+    SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
+    METRICAS_AVALIACAO = OUTPUT_DIR / "metricas_avaliacao.csv"
+    METRICAS_SWEEP = OUTPUT_DIR / "metricas_sweep.csv"
+    METRICAS_ATRIBUICAO = OUTPUT_DIR / "metricas_atribuicao.csv"
+    METRICAS_RESIDUAL = OUTPUT_DIR / "metricas_residual.csv"
+    METRICAS_PESO = OUTPUT_DIR / "metricas_peso.csv"
+    SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
+    return OUTPUT_DIR
+
+
+refresh_output_paths()
 
 # NB00: bases separadas (sem empilhar). NB00b limpa cada uma.
-CENSO_REGISTROS = OUTPUT_DIR / "censo_registros.parquet"
-CPF_REGISTROS = OUTPUT_DIR / "cpf_registros.parquet"
-CENSO_LIMPO = OUTPUT_DIR / "censo_limpo.parquet"
-CPF_LIMPO = OUTPUT_DIR / "cpf_limpo.parquet"
-
 TABELA_CENSO_REGISTROS = "censo_registros"
 TABELA_CPF_REGISTROS = "cpf_registros"
 TABELA_CENSO_LIMPA = "censo_limpo"
 TABELA_CPF_LIMPA = "cpf_limpo"
 
 # JSON no treino (02); predictions/clusters na aplicação (02b); 03 avalia; 04 atribui
-SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
-SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
-SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
-METRICAS_AVALIACAO = OUTPUT_DIR / "metricas_avaliacao.csv"
-METRICAS_SWEEP = OUTPUT_DIR / "metricas_sweep.csv"
-METRICAS_ATRIBUICAO = OUTPUT_DIR / "metricas_atribuicao.csv"
-METRICAS_RESIDUAL = OUTPUT_DIR / "metricas_residual.csv"
-METRICAS_PESO = OUTPUT_DIR / "metricas_peso.csv"
-SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
 MODELS_DIR = PROB_DIR / "models"
 
 CPF_NORM_SQL = "lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 11, '0')"
@@ -774,6 +828,66 @@ def materialize_cohort_cpf_por_censo(
     }
 
 
+def materialize_censo_registros(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    staging_table: str = "censo_staging",
+    cohort_cpf_table: str = "cohort_cpf_por_censo",
+    out_table: str = TABELA_CENSO_REGISTROS,
+) -> None:
+    """Censo staging → registros, com 1 `cpf_norm` por pessoa (MIN se ambíguo).
+
+    Evita subquery escalar: no DuckDB 1.x ela quebra se a coorte devolver
+    mais de uma linha, e `person_id_censo` sem prefixo pode não correlacionar.
+    """
+    from features import (
+        NOME_MAE_COLUMNS,
+        PESSOA_COLUMNS,
+        clean_name_sql,
+        name_feature_columns_sql,
+        normalize_sexo_sql,
+        select_list_sql,
+    )
+
+    pessoa = name_feature_columns_sql("nome_completo_norm", col_map=PESSOA_COLUMNS)
+    mae = {
+        alias: f"NULLIF({expr}, '')"
+        for alias, expr in name_feature_columns_sql(
+            "nome_mae_norm", col_map=NOME_MAE_COLUMNS
+        ).items()
+    }
+    sexo_n = normalize_sexo_sql("n.sexo_raw")
+    con.execute(f"""
+    CREATE OR REPLACE TABLE {out_table} AS
+    WITH norm AS (
+        SELECT *,
+            {clean_name_sql("nome_completo_raw")} AS nome_completo_norm,
+            {clean_name_sql("nome_mae_inferido")} AS nome_mae_norm
+        FROM {staging_table}
+        WHERE person_id_censo IS NOT NULL
+    )
+    SELECT
+        'censo_' || n.person_id_censo AS unique_id, 'censo' AS origem,
+        o.cpf_norm,
+        {select_list_sql(pessoa)},
+        n.data_nascimento,
+        {select_list_sql(mae)},
+        {sexo_n} AS sexo,
+        n.idade,
+        n.cep, CAST(n.uf AS VARCHAR) AS uf,
+        CAST(n.cod_municipio AS VARCHAR) AS cod_municipio,
+        CAST(NULL AS INTEGER) AS ano_obito,
+        n.person_id_censo, n.id_domicilio
+    FROM norm n
+    LEFT JOIN (
+        SELECT person_id_censo, MIN(cpf_norm) AS cpf_norm
+        FROM {cohort_cpf_table}
+        GROUP BY person_id_censo
+    ) o ON o.person_id_censo = n.person_id_censo
+    """)
+    benchmark_checkpoint(con, out_table, f"SELECT COUNT(*) FROM {out_table}")
+
+
 def stamp_censo_cpf_from_cohort(
     con: duckdb.DuckDBPyConnection,
     *,
@@ -1206,7 +1320,9 @@ def require_input(path: Path, *, label: str) -> None:
 
 
 def print_paths() -> None:
+    print("OUTPUT_DIR_BASE:", OUTPUT_DIR_BASE)
     print("OUTPUT_DIR:", OUTPUT_DIR)
+    print("recorte:", recorte_output_slug())
     print("CPF_ARQUIVO:", CPF_ARQUIVO)
     print("CENSO_PESSOAS_ARQUIVO:", CENSO_PESSOAS_ARQUIVO)
     print("CENSO_CEP_ARQUIVO:", CENSO_CEP_ARQUIVO)

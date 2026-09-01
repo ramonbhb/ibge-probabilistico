@@ -13,6 +13,7 @@ from config import (  # noqa: E402
     municipio_filter_clause,
     normalize_municipio_lista,
     normalize_uf_lista,
+    recorte_output_slug,
     uf_filter_clause,
 )
 
@@ -131,3 +132,37 @@ def test_check_registros_vs_filtrado_ok() -> None:
     finally:
         config.set_filtros(uf=old_uf, municipio=old_mun)
         con.close()
+
+
+def test_recorte_output_slug() -> None:
+    assert recorte_output_slug(filtro_uf=None, filtro_municipio=None) == "nacional"
+    assert recorte_output_slug(filtro_uf=21, filtro_municipio=None) == "uf_21"
+    assert recorte_output_slug(filtro_uf=[43, 41, 42], filtro_municipio=None) == (
+        "uf_41_42_43"
+    )
+    assert recorte_output_slug(filtro_uf=[41, 42, 43], filtro_municipio=None) == (
+        "uf_41_42_43"
+    )
+    assert recorte_output_slug(filtro_uf=None, filtro_municipio=2111300) == (
+        "mun_2111300"
+    )
+    assert recorte_output_slug(
+        filtro_uf=None, filtro_municipio=[2105302, 2111300]
+    ) == "mun_2105302_2111300"
+    assert recorte_output_slug(filtro_uf=41, filtro_municipio=4106902) == (
+        "uf_41_mun_4106902"
+    )
+
+
+def test_set_filtros_rebasa_output_dir() -> None:
+    old_uf, old_mun = config.FILTRO_UF, config.FILTRO_MUNICIPIO
+    try:
+        config.set_filtros(uf=[43, 41], municipio=None)
+        assert config.OUTPUT_DIR == config.OUTPUT_DIR_BASE / "uf_41_43"
+        assert config.DUCKDB_ARQUIVO == config.OUTPUT_DIR / "probabilistico.duckdb"
+        assert config.CENSO_REGISTROS.parent == config.OUTPUT_DIR
+
+        config.set_filtros(uf=None, municipio=None)
+        assert config.OUTPUT_DIR == config.OUTPUT_DIR_BASE / "nacional"
+    finally:
+        config.set_filtros(uf=old_uf, municipio=old_mun)
