@@ -1092,6 +1092,71 @@ def load_table_from_parquet(
     return True
 
 
+def check_registros_vs_filtrado(con: duckdb.DuckDBPyConnection) -> None:
+    """O 00b lê censo_registros/cpf_registros, não as tabelas *_filtrado.
+
+    REFILTER_GEO sozinho no NB00 atualiza o filtro e deixa os registros
+    no recorte anterior. Falha cedo se o recorte das tabelas finais não
+    bate com FILTRO_UF/FILTRO_MUNICIPIO ou com *_filtrado.
+    """
+    tabelas = list_tables(con)
+    problemas: list[str] = []
+
+    if "censo_pessoas_filtrado" in tabelas and TABELA_CENSO_REGISTROS in tabelas:
+        n_f = con.execute("SELECT COUNT(*) FROM censo_pessoas_filtrado").fetchone()[0]
+        n_r = con.execute(f"SELECT COUNT(*) FROM {TABELA_CENSO_REGISTROS}").fetchone()[0]
+        print(f"censo_pessoas_filtrado: {n_f:,} | {TABELA_CENSO_REGISTROS}: {n_r:,}")
+        if n_f > 0 and n_r < int(n_f * 0.9):
+            problemas.append(
+                f"{TABELA_CENSO_REGISTROS} ({n_r:,}) está atrás de "
+                f"censo_pessoas_filtrado ({n_f:,})"
+            )
+    if "cpf_filtrado" in tabelas and TABELA_CPF_REGISTROS in tabelas:
+        n_f = con.execute("SELECT COUNT(*) FROM cpf_filtrado").fetchone()[0]
+        n_r = con.execute(f"SELECT COUNT(*) FROM {TABELA_CPF_REGISTROS}").fetchone()[0]
+        print(f"cpf_filtrado: {n_f:,} | {TABELA_CPF_REGISTROS}: {n_r:,}")
+
+    def _distintos(table: str, col: str) -> set[str]:
+        rows = con.execute(
+            f"SELECT DISTINCT CAST({col} AS VARCHAR) FROM {table} "
+            f"WHERE {col} IS NOT NULL AND CAST({col} AS VARCHAR) <> ''"
+        ).fetchall()
+        return {str(r[0]) for r in rows}
+
+    if FILTRO_UF and TABELA_CENSO_REGISTROS in tabelas:
+        ufs = _distintos(TABELA_CENSO_REGISTROS, "uf")
+        esperadas = set(FILTRO_UF)
+        extras = sorted(ufs - esperadas)
+        faltando = sorted(esperadas - ufs)
+        if extras or faltando:
+            problemas.append(
+                f"UF em {TABELA_CENSO_REGISTROS}: {sorted(ufs)} ≠ FILTRO_UF "
+                f"{sorted(esperadas)}"
+                + (f" | extras={extras}" if extras else "")
+                + (f" | faltando={faltando}" if faltando else "")
+            )
+    if FILTRO_MUNICIPIO and TABELA_CENSO_REGISTROS in tabelas:
+        muns = _distintos(TABELA_CENSO_REGISTROS, "cod_municipio")
+        esperadas = set(FILTRO_MUNICIPIO)
+        extras = sorted(muns - esperadas)
+        faltando = sorted(esperadas - muns)
+        if extras or faltando:
+            problemas.append(
+                f"município em {TABELA_CENSO_REGISTROS}: {sorted(muns)} ≠ "
+                f"FILTRO_MUNICIPIO {sorted(esperadas)}"
+                + (f" | extras={extras}" if extras else "")
+                + (f" | faltando={faltando}" if faltando else "")
+            )
+
+    if problemas:
+        raise RuntimeError(
+            "Recorte de censo_registros/cpf_registros desatualizado em relação "
+            "ao filtro atual. No NB00 use REFILTER_GEO=True e rode até o "
+            "export (células de mãe/CEP/registros), não só o filtro "
+            "geográfico.\n" + "\n".join(problemas)
+        )
+
+
 def require_tables(
     con: duckdb.DuckDBPyConnection,
     tables: list[str],

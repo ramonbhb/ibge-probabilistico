@@ -74,3 +74,60 @@ def test_set_filtros_lista() -> None:
         assert municipio_filter_clause("y") == "y IN ('2111300', '2105302')"
     finally:
         config.set_filtros(uf=old_uf, municipio=old_mun)
+
+
+def test_check_registros_vs_filtrado_detecta_recorte_velho() -> None:
+    import duckdb
+    from config import check_registros_vs_filtrado
+
+    con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE censo_pessoas_filtrado AS SELECT 1 AS x FROM range(100)"
+    )
+    con.execute(
+        "CREATE TABLE censo_registros AS "
+        "SELECT '21' AS uf, '2111300' AS cod_municipio FROM range(10)"
+    )
+    con.execute(
+        "CREATE TABLE cpf_filtrado AS SELECT 1 AS x FROM range(100)"
+    )
+    con.execute(
+        "CREATE TABLE cpf_registros AS SELECT '21' AS uf FROM range(10)"
+    )
+    old_uf, old_mun = config.FILTRO_UF, config.FILTRO_MUNICIPIO
+    try:
+        config.set_filtros(uf=[41, 42, 43], municipio=None)
+        try:
+            check_registros_vs_filtrado(con)
+            raise AssertionError("esperava RuntimeError")
+        except RuntimeError as exc:
+            msg = str(exc)
+            assert "censo_registros" in msg
+            assert "FILTRO_UF" in msg
+    finally:
+        config.set_filtros(uf=old_uf, municipio=old_mun)
+        con.close()
+
+
+def test_check_registros_vs_filtrado_ok() -> None:
+    import duckdb
+    from config import check_registros_vs_filtrado
+
+    con = duckdb.connect(":memory:")
+    con.execute(
+        "CREATE TABLE censo_pessoas_filtrado AS SELECT 1 AS x FROM range(100)"
+    )
+    con.execute(
+        "CREATE TABLE censo_registros AS "
+        "SELECT uf, '4106902' AS cod_municipio FROM "
+        "(SELECT unnest(['41','42','43']) AS uf FROM range(34))"
+    )
+    con.execute("CREATE TABLE cpf_filtrado AS SELECT 1 AS x FROM range(100)")
+    con.execute("CREATE TABLE cpf_registros AS SELECT '41' AS uf FROM range(95)")
+    old_uf, old_mun = config.FILTRO_UF, config.FILTRO_MUNICIPIO
+    try:
+        config.set_filtros(uf=[41, 42, 43], municipio=None)
+        check_registros_vs_filtrado(con)
+    finally:
+        config.set_filtros(uf=old_uf, municipio=old_mun)
+        con.close()
