@@ -742,16 +742,28 @@ def materialize_cohort_cpf_por_censo(
     """
     _load_cohort_table(con, cohort_parquet=cohort_parquet, cohort_table=cohort_table)
     cpf_gt = cpf_norm_sql("CPF_NORM")
+    pid = "CAST(PERSON_ID_CENSO AS VARCHAR)"
     con.execute(f"""
     CREATE OR REPLACE TABLE {out_table} AS
     SELECT
-        CAST(PERSON_ID_CENSO AS VARCHAR) AS person_id_censo,
+        {pid} AS person_id_censo,
         MIN({cpf_gt}) AS cpf_norm,
         COUNT(DISTINCT {cpf_gt}) AS n_cpf_distintos
     FROM {cohort_table}
     WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
-    GROUP BY 1
+    GROUP BY {pid}
     """)
+    n_dup = con.execute(f"""
+        SELECT COUNT(*) FROM (
+            SELECT person_id_censo FROM {out_table}
+            GROUP BY person_id_censo HAVING COUNT(*) > 1
+        )
+    """).fetchone()[0]
+    if n_dup:
+        raise RuntimeError(
+            f"{out_table} tem {n_dup} person_id_censo duplicados; "
+            "o carimbo de cpf_norm exige 1 linha por Censo."
+        )
     n_censo = con.execute(f"SELECT COUNT(*) FROM {out_table}").fetchone()[0]
     n_ambig = con.execute(
         f"SELECT COUNT(*) FROM {out_table} WHERE n_cpf_distintos > 1"
