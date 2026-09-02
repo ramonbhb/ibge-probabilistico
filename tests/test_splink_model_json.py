@@ -1,4 +1,4 @@
-"""Contrato do JSON gravado pelo notebook 02 (blocking de predição + comparisons)."""
+"""Contrato do JSON (02) e das 12 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import MODELS_DIR, SPLINK_MODEL_JSON  # noqa: E402
 
-_COL_IN_RULE = re.compile(r'l\."?(\w+)"?\s*=')
+_BLOCK_ON = re.compile(r"block_on\((.*?)\)", re.S)
+_QUOTED = re.compile(r"['\"](\w+)['\"]")
+_NOTEBOOK_02B = Path(__file__).resolve().parent.parent / "notebooks" / "02b_aplicar_splink.ipynb"
 
 
 def _model_path() -> Path | None:
@@ -23,8 +25,17 @@ def _model_path() -> Path | None:
     return None
 
 
-def _cols(rule_sql: str) -> tuple[str, ...]:
-    return tuple(_COL_IN_RULE.findall(rule_sql))
+def _blocking_from_02b() -> list[tuple[str, ...]]:
+    nb = json.loads(_NOTEBOOK_02B.read_text(encoding="utf-8"))
+    src = None
+    for cell in nb["cells"]:
+        text = "".join(cell.get("source", []))
+        if "blocking_rules = [" in text:
+            src = text
+            break
+    if src is None:
+        raise AssertionError("02b sem célula blocking_rules")
+    return [tuple(_QUOTED.findall(args)) for args in _BLOCK_ON.findall(src)]
 
 
 @pytest.fixture(scope="module")
@@ -34,39 +45,24 @@ def model() -> dict:
         pytest.skip("splink_model.json ausente — rode notebooks/02_treinar_splink.ipynb")
     with path.open(encoding="utf-8") as f:
         data = json.load(f)
-
-    rules = data.get("blocking_rules_to_generate_predictions", [])
-    blocking = [_cols(rule["blocking_rule"]) for rule in rules]
-    cep_rules = {
-        ("ultimo_nome_phon", "mes_nascimento", "dia_nascimento", "sexo", "cep"),
-        ("ultimo_nome_phon", "mes_nascimento", "ano_nascimento", "cep"),
-        ("data_nascimento", "cep"),
-        ("data_nascimento", "uf", "sexo", "cep"),
-    }
-    if not cep_rules.issubset(set(blocking)):
-        pytest.skip(
-            f"{path} ainda é um JSON antigo (faltam as quatro regras com CEP). "
-            "Retreinar notebooks/02_treinar_splink.ipynb."
-        )
     comparison_names = [c["output_column_name"] for c in data.get("comparisons", [])]
     if (
         "primeiro_nome_phon" not in comparison_names
         or "ultimo_nome_phon" not in comparison_names
+        or "nome_meio_phon" in comparison_names
+        or "sexo" in comparison_names
     ):
         pytest.skip(
             f"{path} ainda é um JSON antigo "
-            "(score sem primeiro_nome_phon e ultimo_nome_phon). "
+            "(score fora do spec: completo + primeiro + último, sem meio/sexo). "
             "Retreinar notebooks/02_treinar_splink.ipynb."
         )
     return data
 
 
 @pytest.fixture(scope="module")
-def blocking_cols(model: dict) -> list[tuple[str, ...]]:
-    return [
-        _cols(rule["blocking_rule"])
-        for rule in model["blocking_rules_to_generate_predictions"]
-    ]
+def blocking_cols() -> list[tuple[str, ...]]:
+    return _blocking_from_02b()
 
 
 @pytest.fixture(scope="module")
@@ -148,6 +144,14 @@ def test_comparisons_completo_primeiro_ultimo_sem_composto_sem_meio_sem_mae(
     assert "mes_nascimento" not in comparison_names
     assert "dia_nascimento" not in comparison_names
     assert "nome_mae_phon" not in comparison_names
+
+
+def test_idade_else_m_fixo(model: dict) -> None:
+    idade = next(c for c in model["comparisons"] if c["output_column_name"] == "idade")
+    else_lvl = idade["comparison_levels"][-1]
+    assert else_lvl.get("sql_condition") == "ELSE"
+    assert else_lvl.get("m_probability") == 1e-6
+    assert else_lvl.get("fix_m_probability") is True
 
 
 def test_data_nascimento_else_m_fixo(model: dict) -> None:
