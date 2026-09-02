@@ -36,11 +36,16 @@ def model() -> dict:
         data = json.load(f)
 
     rules = data.get("blocking_rules_to_generate_predictions", [])
-    names = [c.get("output_column_name", "") for c in data.get("comparisons", [])]
-    stale = len(rules) != 12 and ("sexo" in names or "cep" in names)
-    if stale:
+    blocking = [_cols(rule["blocking_rule"]) for rule in rules]
+    cep_rules = {
+        ("ultimo_nome_phon", "mes_nascimento", "dia_nascimento", "sexo", "cep"),
+        ("ultimo_nome_phon", "mes_nascimento", "ano_nascimento", "cep"),
+        ("data_nascimento", "cep"),
+        ("data_nascimento", "uf", "sexo", "cep"),
+    }
+    if not cep_rules.issubset(set(blocking)):
         pytest.skip(
-            f"{path} ainda é um JSON antigo (não tem 12 regras de predição). "
+            f"{path} ainda é um JSON antigo (faltam as quatro regras com CEP). "
             "Retreinar notebooks/02_treinar_splink.ipynb."
         )
     return data
@@ -63,12 +68,19 @@ def test_doze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
     assert len(blocking_cols) == 12
     assert blocking_cols[0] == ("nome_completo_phon",)
     assert ("data_nascimento", "cep") in blocking_cols
-    assert ("data_nascimento", "uf", "sexo") in blocking_cols
+    assert ("data_nascimento", "uf", "sexo", "cep") in blocking_cols
     assert (
         "ultimo_nome_phon",
         "mes_nascimento",
         "dia_nascimento",
         "sexo",
+        "cep",
+    ) in blocking_cols
+    assert (
+        "ultimo_nome_phon",
+        "mes_nascimento",
+        "ano_nascimento",
+        "cep",
     ) in blocking_cols
 
 
@@ -89,12 +101,13 @@ def test_meio_fora_do_blocking_de_predicao(
 
 def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None:
     com_sexo = [cols for cols in blocking_cols if "sexo" in cols]
-    assert ("data_nascimento", "uf", "sexo") in com_sexo
+    assert ("data_nascimento", "uf", "sexo", "cep") in com_sexo
     assert (
         "ultimo_nome_phon",
         "mes_nascimento",
         "dia_nascimento",
         "sexo",
+        "cep",
     ) in com_sexo
     assert len(com_sexo) == 2
     for cols in blocking_cols:
