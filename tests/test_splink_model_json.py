@@ -49,9 +49,13 @@ def model() -> dict:
             "Retreinar notebooks/02_treinar_splink.ipynb."
         )
     comparison_names = [c["output_column_name"] for c in data.get("comparisons", [])]
-    if "primeiro_ultimo_phon" not in comparison_names:
+    if (
+        "primeiro_nome_phon" not in comparison_names
+        or "ultimo_nome_phon" not in comparison_names
+    ):
         pytest.skip(
-            f"{path} ainda é um JSON antigo (score sem primeiro_ultimo_phon). "
+            f"{path} ainda é um JSON antigo "
+            "(score sem primeiro_nome_phon e ultimo_nome_phon). "
             "Retreinar notebooks/02_treinar_splink.ipynb."
         )
     return data
@@ -128,14 +132,14 @@ def test_comparisons_sem_cpf_sexo_cep(comparison_names: list[str]) -> None:
     assert "cep" not in blob
 
 
-def test_comparisons_completo_e_primeiro_ultimo_sem_partes_sem_mae(
+def test_comparisons_completo_primeiro_ultimo_sem_composto_sem_meio_sem_mae(
     comparison_names: list[str],
 ) -> None:
     assert "nome_completo_phon" in comparison_names
-    assert "primeiro_ultimo_phon" in comparison_names
-    assert "primeiro_nome_phon" not in comparison_names
+    assert "primeiro_nome_phon" in comparison_names
+    assert "ultimo_nome_phon" in comparison_names
+    assert "primeiro_ultimo_phon" not in comparison_names
     assert "nome_meio_phon" not in comparison_names
-    assert "ultimo_nome_phon" not in comparison_names
     assert "primeiro_ultimo" not in comparison_names
     assert "data_nascimento" in comparison_names
     assert "idade" in comparison_names

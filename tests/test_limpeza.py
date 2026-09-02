@@ -276,14 +276,21 @@ def test_idade_do_cpf_acompanha_a_data(con) -> None:
         """CREATE TABLE t AS SELECT * FROM (VALUES
         ('cpf',   '1850-01-01', 172),
         ('cpf',   '1990-01-02',  32),
-        ('censo', '',            40)
+        ('censo', '',            40),
+        ('censo', '1990-01-02',  40)
     ) v(origem, data_nascimento, idade)"""
     )
     linhas = con.execute(
-        f"SELECT origem, {cols['idade']} AS idade FROM t"
+        f"SELECT origem, data_nascimento, {cols['idade']} AS idade FROM t"
     ).fetchall()
-    assert linhas == [("cpf", None), ("cpf", 32), ("censo", 40)], (
-        "idade do CPF deriva da data e cai junto; a do Censo vem de PECP0401"
+    assert linhas == [
+        ("cpf", "1850-01-01", None),
+        ("cpf", "1990-01-02", 32),
+        ("censo", "", 40),
+        ("censo", "1990-01-02", None),
+    ], (
+        "idade do CPF deriva da data e cai junto; Censo só mantém PECP0401 "
+        "quando a data validada é nula"
     )
 
 
@@ -317,28 +324,25 @@ def test_materialize_splink_input_nao_duplica_partes(con, monkeypatch) -> None:
     monkeypatch.setattr(cfg, "TABELA_CPF_LIMPA", "cpf_limpo")
     schema = """
         unique_id VARCHAR, origem VARCHAR, data_nascimento VARCHAR,
-        ano_nascimento VARCHAR, mes_nascimento VARCHAR, dia_nascimento VARCHAR,
-        primeiro_nome VARCHAR, ultimo_nome VARCHAR,
-        primeiro_nome_phon VARCHAR, ultimo_nome_phon VARCHAR
+        ano_nascimento VARCHAR, mes_nascimento VARCHAR, dia_nascimento VARCHAR
     """
     con.execute(f"CREATE TABLE censo_limpo ({schema})")
     con.execute(f"CREATE TABLE cpf_limpo ({schema})")
     con.execute(
         "INSERT INTO censo_limpo VALUES "
-        "('c1', 'censo', NULL, NULL, '05', '07', 'AMANCIO', 'LUCENA', 'AMANSIO', 'LUSENA')"
+        "('c1', 'censo', NULL, NULL, '05', '07')"
     )
     con.execute(
         "INSERT INTO cpf_limpo VALUES "
-        "('p1', 'cpf', NULL, NULL, '05', '07', 'ANTONIO', 'LUCENA', 'ANTONIO', 'LUSENA')"
+        "('p1', 'cpf', NULL, NULL, '05', '07')"
     )
     materialize_splink_input(con, censo_table="censo_limpo", cpf_table="cpf_limpo")
     cols = [r[0] for r in con.execute(f"DESCRIBE {SPLINK_INPUT_VIEW}").fetchall()]
     assert cols.count("mes_nascimento") == 1
-    assert cols.count("primeiro_ultimo") == 1
-    assert cols.count("primeiro_ultimo_phon") == 1
+    assert "primeiro_ultimo" not in cols
+    assert "primeiro_ultimo_phon" not in cols
     row = con.execute(
-        f"SELECT mes_nascimento, dia_nascimento, data_nascimento, "
-        f"primeiro_ultimo, primeiro_ultimo_phon "
+        f"SELECT mes_nascimento, dia_nascimento, data_nascimento "
         f"FROM {SPLINK_INPUT_VIEW} WHERE unique_id = 'c1'"
     ).fetchone()
-    assert row == ("05", "07", None, "AMANCIO LUCENA", "AMANSIO LUSENA")
+    assert row == ("05", "07", None)

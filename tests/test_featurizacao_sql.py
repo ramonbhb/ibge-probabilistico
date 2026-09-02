@@ -64,9 +64,11 @@ CHAVES = [
     "primeiro_nome",
     "nome_meio",
     "ultimo_nome",
+    "primeiro_ultimo",
     "primeiro_nome_phon",
     "nome_meio_phon",
     "ultimo_nome_phon",
+    "primeiro_ultimo_phon",
 ]
 
 
@@ -81,15 +83,19 @@ def referencia_python(nome: str) -> dict[str, str | None]:
     def nulo(v: str) -> str | None:
         return v if v else None
 
+    partes = [p for p in (primeiro, ultimo) if p]
+    partes_phon = [p for p in (p_phon, u_phon) if p]
     return {
         "nome_completo": limpo,
         "nome_completo_phon": nulo(completo_phon),
         "primeiro_nome": nulo(primeiro),
         "nome_meio": nulo(meio),
         "ultimo_nome": nulo(ultimo),
+        "primeiro_ultimo": nulo(" ".join(partes)),
         "primeiro_nome_phon": nulo(p_phon),
         "nome_meio_phon": nulo(m_phon),
         "ultimo_nome_phon": nulo(u_phon),
+        "primeiro_ultimo_phon": nulo(" ".join(partes_phon)),
     }
 
 

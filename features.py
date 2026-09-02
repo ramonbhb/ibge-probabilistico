@@ -335,9 +335,11 @@ PESSOA_COLUMNS = {
     "primeiro_nome": "primeiro_nome",
     "nome_meio": "nome_meio",
     "ultimo_nome": "ultimo_nome",
+    "primeiro_ultimo": "primeiro_ultimo",
     "primeiro_nome_phon": "primeiro_nome_phon",
     "nome_meio_phon": "nome_meio_phon",
     "ultimo_nome_phon": "ultimo_nome_phon",
+    "primeiro_ultimo_phon": "primeiro_ultimo_phon",
 }
 
 NOME_MAE_COLUMNS = {
@@ -373,9 +375,19 @@ def name_feature_columns_sql(
         "primeiro_nome": _nullif_empty_sql(partes["primeiro_nome"]),
         "nome_meio": _nullif_empty_sql(partes["nome_meio"]),
         "ultimo_nome": _nullif_empty_sql(partes["ultimo_nome"]),
+        "primeiro_ultimo": _nullif_empty_sql(
+            "TRIM(CONCAT_WS(' ', "
+            f"NULLIF({partes['primeiro_nome']}, ''), "
+            f"NULLIF({partes['ultimo_nome']}, '')))"
+        ),
         "primeiro_nome_phon": _nullif_empty_sql(partes_phon["primeiro_nome"]),
         "nome_meio_phon": _nullif_empty_sql(partes_phon["nome_meio"]),
         "ultimo_nome_phon": _nullif_empty_sql(partes_phon["ultimo_nome"]),
+        "primeiro_ultimo_phon": _nullif_empty_sql(
+            "TRIM(CONCAT_WS(' ', "
+            f"NULLIF({partes_phon['primeiro_nome']}, ''), "
+            f"NULLIF({partes_phon['ultimo_nome']}, '')))"
+        ),
     }
     if col_map:
         cols = {col_map[k]: v for k, v in cols.items() if k in col_map}
