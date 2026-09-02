@@ -702,6 +702,13 @@ _DOB_PARTS_SQL = """
         END AS dia_nascimento
 """
 
+_PRIMEIRO_ULTIMO_SQL = """
+        NULLIF(TRIM(CONCAT_WS(' ', t.primeiro_nome, t.ultimo_nome)), '')
+            AS primeiro_ultimo,
+        NULLIF(TRIM(CONCAT_WS(' ', t.primeiro_nome_phon, t.ultimo_nome_phon)), '')
+            AS primeiro_ultimo_phon
+"""
+
 
 def materialize_splink_input(
     con: duckdb.DuckDBPyConnection,
@@ -709,10 +716,11 @@ def materialize_splink_input(
     censo_table: str | None = None,
     cpf_table: str | None = None,
 ) -> tuple[str, str]:
-    """View `splink_input` = UNION das duas bases limpas (+ partes DOB).
+    """View `splink_input` = UNION das duas bases limpas (+ partes DOB + composto).
 
     Prefere `censo_limpo` / `cpf_limpo`. Se faltarem, cai nas tabelas do NB00
-    (ainda com sentinelas) e avisa.
+    (ainda com sentinelas) e avisa. `primeiro_ultimo` / `primeiro_ultimo_phon`
+    nascem aqui (CONCAT_WS das partes); as tabelas limpas não mudam.
     """
     tabelas = list_tables(con)
     censo = censo_table or (
@@ -739,9 +747,11 @@ def materialize_splink_input(
     cols_cpf = {r[0] for r in con.execute(f"DESCRIBE {cpf}").fetchall()}
     ja_tem_partes = partes <= cols_censo and partes <= cols_cpf
     if ja_tem_partes:
-        select_sql = "SELECT * FROM unioned"
+        select_sql = f"SELECT t.*, {_PRIMEIRO_ULTIMO_SQL} FROM unioned t"
     else:
-        select_sql = f"SELECT t.*, {_DOB_PARTS_SQL} FROM unioned t"
+        select_sql = (
+            f"SELECT t.*, {_DOB_PARTS_SQL}, {_PRIMEIRO_ULTIMO_SQL} FROM unioned t"
+        )
     con.execute(f"""
     CREATE OR REPLACE VIEW {SPLINK_INPUT_VIEW} AS
     WITH unioned AS (

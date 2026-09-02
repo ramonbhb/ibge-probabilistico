@@ -317,23 +317,28 @@ def test_materialize_splink_input_nao_duplica_partes(con, monkeypatch) -> None:
     monkeypatch.setattr(cfg, "TABELA_CPF_LIMPA", "cpf_limpo")
     schema = """
         unique_id VARCHAR, origem VARCHAR, data_nascimento VARCHAR,
-        ano_nascimento VARCHAR, mes_nascimento VARCHAR, dia_nascimento VARCHAR
+        ano_nascimento VARCHAR, mes_nascimento VARCHAR, dia_nascimento VARCHAR,
+        primeiro_nome VARCHAR, ultimo_nome VARCHAR,
+        primeiro_nome_phon VARCHAR, ultimo_nome_phon VARCHAR
     """
     con.execute(f"CREATE TABLE censo_limpo ({schema})")
     con.execute(f"CREATE TABLE cpf_limpo ({schema})")
     con.execute(
         "INSERT INTO censo_limpo VALUES "
-        "('c1', 'censo', NULL, NULL, '05', '07')"
+        "('c1', 'censo', NULL, NULL, '05', '07', 'AMANCIO', 'LUCENA', 'AMANSIO', 'LUSENA')"
     )
     con.execute(
         "INSERT INTO cpf_limpo VALUES "
-        "('p1', 'cpf', NULL, NULL, '05', '07')"
+        "('p1', 'cpf', NULL, NULL, '05', '07', 'ANTONIO', 'LUCENA', 'ANTONIO', 'LUSENA')"
     )
     materialize_splink_input(con, censo_table="censo_limpo", cpf_table="cpf_limpo")
     cols = [r[0] for r in con.execute(f"DESCRIBE {SPLINK_INPUT_VIEW}").fetchall()]
     assert cols.count("mes_nascimento") == 1
+    assert cols.count("primeiro_ultimo") == 1
+    assert cols.count("primeiro_ultimo_phon") == 1
     row = con.execute(
-        f"SELECT mes_nascimento, dia_nascimento, data_nascimento "
+        f"SELECT mes_nascimento, dia_nascimento, data_nascimento, "
+        f"primeiro_ultimo, primeiro_ultimo_phon "
         f"FROM {SPLINK_INPUT_VIEW} WHERE unique_id = 'c1'"
     ).fetchone()
-    assert row == ("05", "07", None)
+    assert row == ("05", "07", None, "AMANCIO LUCENA", "AMANSIO LUSENA")
