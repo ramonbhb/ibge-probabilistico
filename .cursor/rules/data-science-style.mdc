@@ -1,0 +1,102 @@
+---
+description: Padrão de notebooks Python, DuckDB e SQL — clareza sequencial de analista, não engenharia.
+alwaysApply: true
+---
+
+# Data science style
+
+Prioridade: clareza > simplicidade > legibilidade > facilidade de alteração > correção > performance (só quando precisa).
+
+O notebook deve parecer o trabalho de um analista humano: sequencial, pragmático, legível por quem programa pouco. Não o código mais sofisticado nem um projeto de engenharia.
+
+Antes de gerar código: preciso de uma função? (quase sempre não.) Python ou SQL fica mais claro? Alguém de negócio acompanha de cima para baixo?
+
+## Notebook sequencial
+
+Cada célula é uma etapa concreta. Variáveis se reutilizam nas células seguintes. Não torne cada célula independente.
+
+```python
+df = ...
+df = df[df["status"] == "ativo"]
+df["receita_liquida"] = df["receita"] - df["desconto"]
+resumo = (
+    df.groupby("categoria", as_index=False)
+    .agg(receita=("receita_liquida", "sum"))
+)
+```
+
+Células pequenas/médias: uma operação lógica por célula, várias linhas se forem a mesma operação. Não junte consulta + tratamento + agregação + gráfico. Não fragmente cada linha.
+
+Seções só as que fizerem sentido: objetivo, imports, config, carga, inspeção, filtros, tratamento, variáveis, agregações, EDA, modelo, avaliação, resultados, conclusões.
+
+Markdown só em mudança de contexto (objetivo, regra de negócio, escolha metodológica, conclusão). Não um título antes de cada célula.
+
+## Sem funções (quase sempre)
+
+Não crie função para organizar, encapsular 3 linhas, parecer profissional, ou seguir DRY de engenharia.
+
+Só função se a mesma lógica roda várias vezes, é complexa demais na célula, ou recebe entradas diferentes repetidamente.
+
+```python
+# ruim
+def filtrar_clientes_ativos(df):
+    return df[df["status"] == "ativo"]
+
+# bom
+df = df[df["status"] == "ativo"]
+```
+
+Sem classes, wrappers de DuckDB/pandas, `execute_query()`, módulos auxiliares, pipelines, factories. SQL visível na célula, não escondido em arquivo/função.
+
+## Variáveis e Python
+
+Reutilize `df`. Nomes = significado dos dados (`vendas`, `resumo_mensal`), não o estágio (`df_filtrado_v2`). Nova variável só para um objeto conceitual novo (`vendas_clientes`).
+
+Evite `x`, `tmp`, `aux`, `df2`. Constantes só para valores importantes repetidos (`DATA_INICIO`). Imports no início, só o que usa, aliases comuns.
+
+Comentários raros, só o que o código não diz:
+
+```python
+# Cancelamentos no mesmo dia da compra não entram na receita.
+df = df[df["data_cancelamento"] != df["data_compra"]]
+```
+
+Sem `try/except` genérico; erros devem aparecer. Sem `except: pass`.
+
+## Pandas, SQL, DuckDB
+
+Pandas: operações conhecidas; encadeamento curto ok. Quebre filtros + colunas + merge + agg em etapas.
+
+DuckDB quando SQL fica mais claro. Query direta na célula; pode ler DataFrame pelo nome.
+
+```python
+resumo = duckdb.sql("""
+    SELECT categoria, COUNT(*) AS quantidade, SUM(receita) AS receita
+    FROM df
+    GROUP BY categoria
+    ORDER BY receita DESC
+""").df()
+resumo.head()
+```
+
+SQL simples: SELECT, WHERE, GROUP BY, ORDER BY, JOIN, CASE WHEN, datas, Parquet. Várias queries curtas em células > uma query gigante. CTE só se melhorar clareza (1–2); cadeia de CTEs → quebrar em células. Sem subquery aninhada profunda. Window function só se for a forma natural; senão agregação simples.
+
+JOIN explícito; aliases legíveis. Depois: linhas, IDs únicos, duplicidade, nulos.
+
+Datas explícitas (`pd.to_datetime`, `DATE '2025-01-01'`); período e granularidade claros.
+
+Nulos: investigar antes de preencher (`df.isna().mean()`, `COUNT(*) FILTER`).
+
+SQL para filtrar/juntar/agregar; Python para stats, gráfico, ML, o que SQL deixa artificial.
+
+## Validação, gráfico, ML
+
+Depois de transformação importante: `shape`, `head()`, `sample(5)`, `isna().sum()`, `value_counts()`, `nunique()`. Sem framework de validação.
+
+Gráfico simples, uma pergunta, título/eixos/unidade. Sem dashboard.
+
+ML: dados → treino/teste → baseline → modelo simples → avaliar. Complexidade só se precisar. Sem pipeline customizado.
+
+## Aparência de LLM — evitar
+
+Uma função por operação; docstring em tudo; comentário em cada linha; classes em análise simples; dezenas de intermediários; try/except em todo bloco; query/CTE que resolve o mundo; Markdown demais; código defensivo “caso precise depois”.
