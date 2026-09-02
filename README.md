@@ -27,7 +27,7 @@ SEXO_VALIDOS = ("M", "F")                     # fora daqui o sexo vira NULL
 Cada eixo aceita **escalar ou lista**. O recorte usual é **só um** (UF *ou* município). Se os dois estiverem preenchidos, a cláusula é AND (como antes).
 
 `ANO_OBITO_CORTE = 0` desliga o filtro de óbito (a regra exige `ano > 0` e `ano <= corte`). Subir o corte (ex. 2030) remove **mais** gente, não desliga.
-Corte de clustering/métricas: `THRESHOLD_AVALIACAO` (default `0.95`), também sobrescreve por `export THRESHOLD_AVALIACAO=0.98`.
+Corte operacional (`THRESHOLD_AVALIACAO`, default 0,99): avaliação 03 e export 04. Também `export THRESHOLD_AVALIACAO=0.98`.
 
 Não existem `export FILTRO_UF` / `export FILTRO_MUNICIPIO`: filtro é parâmetro de análise, não configuração de ambiente.
 
@@ -50,7 +50,7 @@ Têm default em `config.py` e aceitam variável de ambiente:
 export OUTPUT_DIR=~/data/probabilistico_output   # base; o recorte vira subdir (uf_41_42_43, nacional, …)
 export DUCKDB_THREADS=20           # Splink/DuckDB
 export DUCKDB_MEMORY_LIMIT=370GB   # Splink/DuckDB
-export THRESHOLD_AVALIACAO=0.99    # clustering 02b, avaliação 03, export 04
+export THRESHOLD_AVALIACAO=0.99    # avaliação 03, export 04
 ```
 
 Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_ARQUIVO` (default `~/singed/bases/raw/censo/data_cep_uniq.csv`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `DUCKDB_TEMP_DIR`.
@@ -63,19 +63,15 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Limpa cada base → `censo_limpo` / `cpf_limpo`; óbito ≤ corte; sem nome; sentinelas → NULL; re-carimba CPF da coorte |
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
 | [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb) | Profile + blocking + treino `link_only` (spec do modelo neste notebook; meio no score) → `splink_model.json` |
-| [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | Carrega o JSON (não retreina) → `predict(0,5)` + cluster `THRESHOLD_AVALIACAO` |
+| [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | Carrega o JSON (não retreina) → `predict(0,5)` → parquet estreito (sem clustering) |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Exemplos ≥ T e faixa, melhor CPF por Censo, recall ouro nas únicas, 1:1 abaixo de T (sem cluster) |
 | [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Exporta só associações únicas (`splink_atribuicao.parquet`) |
-| [`05_avaliar_residual.ipynb`](notebooks/05_avaliar_residual.ipynb) | Redireciona ao 03 |
-| [`06_atribuir_peso.ipynb`](notebooks/06_atribuir_peso.ipynb) | Redireciona ao 03/04 |
 
 **Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` exportar lista.
 
 Do NB00b em diante o Splink consome `censo_limpo` ∪ `cpf_limpo` via `materialize_splink_input` (view `splink_input`). Sem `registro_unificado` / `registro_limpo` empilhados.
 
-`predict()` no `02b_aplicar` gera pares ≥0,5 (opcionalmente com
-`PREDICT_NUM_CHUNKS_LEFT` / `PREDICT_NUM_CHUNKS_RIGHT`); export via
-`SplinkDataFrame.to_parquet` (sem materializar tudo em pandas). **Clustering no 02b e corte no 03/04 usam `THRESHOLD_AVALIACAO`** (default 0,99). Se o JSON não existir, o `02b` falha apontando o notebook de treino — não retreina sozinho. O 03 não exige clusters. O 04 não depende das células do 03; gera `splink_atribuicao.parquet` com as associações únicas.
+`predict()` no `02b_aplicar` gera pares ≥0,5 e grava parquet estreito (ids + score); **não clusteriza**. Corte `THRESHOLD_AVALIACAO` (default 0,99) entra no 03/04. Se o JSON não existir, o `02b` falha apontando o notebook de treino. O 04 não depende das células do 03.
 
 **1ª passada do modelo (`02_treinar`):** o spec (blocking de predição, comparisons, `SettingsCreator`, prior) está nas células do [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). O `02b` só carrega o JSON. Sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes fonéticos (completo, primeiro, **meio**, último): exact + Jaro-Winkler 0,95 e 0,92. `nome_meio_phon` entra no **score**, não no blocking de predição (meio diferente derruba homônimo de primeiro+DOB; os dois nulos são NullLevel). DOB: uma comparison (`data_nascimento`) com Null custom → Exact ISO + TF → Damerau ≤ 1 → mês e dia iguais → ELSE `m=1e-6` fixo. Partes da data (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) entram no blocking e no nível mês/dia da comparison; Damerau na string ISO pega transposições `01`↔`10`. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`. UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra numa regra de predição sem nome (DOB+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
 
@@ -160,7 +156,7 @@ Regras em [`config.py`](config.py) (`obito_antes_do_censo_sql`, `sem_nome_sql`, 
 | `probabilistico.duckdb`, `censo_registros.parquet`, `cpf_registros.parquet` | NB00 |
 | `censo_limpo.parquet`, `cpf_limpo.parquet` | NB00b |
 | `splink_model.json` | `02_treinar` |
-| `splink_predictions.parquet`, `splink_clusters.parquet`, `dashboards/cluster_studio.html` | `02b_aplicar` |
+| `splink_predictions.parquet` | `02b_aplicar` |
 | `models/splink_model.json` | cópia versionada do modelo (atualizar após retreino no `02_treinar`) |
 | `splink_atribuicao.parquet` | `04_atribuir` (associações únicas, melhor nota) |
 

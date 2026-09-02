@@ -121,7 +121,7 @@ DATA_REFERENCIA_IDADE = "2022-08-01"
 # anulá-la joga sinal fora.
 SEXO_VALIDOS = ("M", "F")
 
-# Corte operacional: clustering (02b), métricas (03) e atribuição (04).
+# Corte operacional: avaliação (03) e export da lista única (04).
 # Override: export THRESHOLD_AVALIACAO=0.98
 THRESHOLD_AVALIACAO = float(os.environ.get("THRESHOLD_AVALIACAO", "0.99"))
 
@@ -206,12 +206,6 @@ CENSO_LIMPO: Path
 CPF_LIMPO: Path
 SPLINK_MODEL_JSON: Path
 SPLINK_PREDICTIONS: Path
-SPLINK_CLUSTERS: Path
-METRICAS_AVALIACAO: Path
-METRICAS_SWEEP: Path
-METRICAS_ATRIBUICAO: Path
-METRICAS_RESIDUAL: Path
-METRICAS_PESO: Path
 SPLINK_ATRIBUICAO: Path
 
 CENSO_DIR = Path(
@@ -256,8 +250,6 @@ def refresh_output_paths() -> Path:
     """OUTPUT_DIR = OUTPUT_DIR_BASE / slug do filtro; rebind de DuckDB e parquets."""
     global OUTPUT_DIR, DUCKDB_ARQUIVO, CENSO_REGISTROS, CPF_REGISTROS
     global CENSO_LIMPO, CPF_LIMPO, SPLINK_MODEL_JSON, SPLINK_PREDICTIONS
-    global SPLINK_CLUSTERS, METRICAS_AVALIACAO, METRICAS_SWEEP
-    global METRICAS_ATRIBUICAO, METRICAS_RESIDUAL, METRICAS_PESO
     global SPLINK_ATRIBUICAO
     OUTPUT_DIR = OUTPUT_DIR_BASE / recorte_output_slug()
     DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
@@ -267,12 +259,6 @@ def refresh_output_paths() -> Path:
     CPF_LIMPO = OUTPUT_DIR / "cpf_limpo.parquet"
     SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
     SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
-    SPLINK_CLUSTERS = OUTPUT_DIR / "splink_clusters.parquet"
-    METRICAS_AVALIACAO = OUTPUT_DIR / "metricas_avaliacao.csv"
-    METRICAS_SWEEP = OUTPUT_DIR / "metricas_sweep.csv"
-    METRICAS_ATRIBUICAO = OUTPUT_DIR / "metricas_atribuicao.csv"
-    METRICAS_RESIDUAL = OUTPUT_DIR / "metricas_residual.csv"
-    METRICAS_PESO = OUTPUT_DIR / "metricas_peso.csv"
     SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
     return OUTPUT_DIR
 
@@ -285,7 +271,7 @@ TABELA_CPF_REGISTROS = "cpf_registros"
 TABELA_CENSO_LIMPA = "censo_limpo"
 TABELA_CPF_LIMPA = "cpf_limpo"
 
-# JSON no treino (02); predictions/clusters na aplicação (02b); 03 avalia; 04 atribui
+# JSON no treino (02); predictions na aplicação (02b); 03 avalia; 04 exporta a lista
 MODELS_DIR = PROB_DIR / "models"
 
 CPF_NORM_SQL = "lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 11, '0')"
@@ -1008,145 +994,14 @@ def materialize_gt_no_subset(
     return {
         **counts,
         "n_gt_no_subset": int(n_subset),
-        # alias legado
-        "n_prata_descartada": counts["n_nao_1a1_descartada"],
-    }
-
-
-# Aliases legados (carimbo / GT)
-def materialize_ouro_1a1(*args, **kwargs):
-    """Alias de `materialize_gt_1a1` (nomenclatura antiga)."""
-    if "out_table" not in kwargs:
-        kwargs["out_table"] = "ouro_1a1"
-    counts = materialize_gt_1a1(*args, **kwargs)
-    counts["n_prata_descartada"] = counts["n_nao_1a1_descartada"]
-    return counts
-
-
-def stamp_censo_cpf_from_ouro(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    table: str,
-    ouro_table: str = "ouro_1a1",
-) -> int:
-    """Alias de `stamp_censo_cpf_from_cohort` (nomenclatura antiga)."""
-    return stamp_censo_cpf_from_cohort(
-        con, table=table, cohort_cpf_table=ouro_table
-    )
-
-
-def materialize_cluster_composicao(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    clusters_table: str = "splink_clusters",
-    splink_view: str = SPLINK_INPUT_VIEW,
-    out_table: str = "cluster_composicao",
-) -> None:
-    """Tipo de cluster: singleton, 1_para_1, 1_cpf_n_censo, outros."""
-    con.execute(f"""
-    CREATE OR REPLACE TABLE {out_table} AS
-    SELECT
-        cluster_id,
-        COUNT(*) AS n,
-        COUNT(*) FILTER (WHERE s.origem = 'censo') AS n_censo,
-        COUNT(*) FILTER (WHERE s.origem = 'cpf') AS n_cpf,
-        CASE
-            WHEN COUNT(*) = 1 THEN 'singleton'
-            WHEN COUNT(*) FILTER (WHERE s.origem = 'censo') = 1
-             AND COUNT(*) FILTER (WHERE s.origem = 'cpf') = 1 THEN '1_para_1'
-            WHEN COUNT(*) FILTER (WHERE s.origem = 'cpf') = 1
-             AND COUNT(*) FILTER (WHERE s.origem = 'censo') >= 2 THEN '1_cpf_n_censo'
-            ELSE 'outros'
-        END AS tipo
-    FROM {clusters_table} sc
-    JOIN {splink_view} s ON s.unique_id = sc.unique_id
-    GROUP BY cluster_id
-    """)
-
-
-def materialize_atribuicao(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    threshold: float | None = None,
-    predictions_table: str = "splink_predictions",
-    clusters_table: str = "splink_clusters",
-    composicao_table: str = "cluster_composicao",
-    out_table: str = "atribuicao_censo_cpf",
-) -> dict[str, int | float]:
-    """1 CPF por Censo: greedy por score, fora de clusters `outros`.
-
-    Espera `predictions_table` com unique_id_l = Censo, unique_id_r = CPF.
-    Censo e CPF do par precisam estar no mesmo cluster. `outros` (N×M) não entra.
-    Empate de score: desempata por unique_id_censo. Ordena no pandas — o `.df()`
-    do DuckDB não garante a ordem do `ORDER BY`.
-    """
-    import pandas as pd
-
-    t = THRESHOLD_AVALIACAO if threshold is None else float(threshold)
-    candidatos = con.execute(f"""
-    SELECT
-        p.unique_id_l AS unique_id_censo,
-        p.unique_id_r AS unique_id_cpf,
-        p.match_probability,
-        cl.cluster_id,
-        comp.tipo
-    FROM {predictions_table} p
-    JOIN {clusters_table} cl ON cl.unique_id = p.unique_id_l
-    JOIN {clusters_table} cr ON cr.unique_id = p.unique_id_r
-    JOIN {composicao_table} comp ON comp.cluster_id = cl.cluster_id
-    WHERE p.match_probability >= {t}
-      AND cl.cluster_id = cr.cluster_id
-      AND comp.tipo <> 'outros'
-    """).df()
-    if len(candidatos):
-        candidatos = candidatos.sort_values(
-            ["match_probability", "unique_id_censo"],
-            ascending=[False, True],
-            kind="mergesort",
-        )
-
-    used_censo: set[str] = set()
-    used_cpf: set[str] = set()
-    kept: list[dict] = []
-    for row in candidatos.itertuples(index=False):
-        if row.unique_id_censo in used_censo or row.unique_id_cpf in used_cpf:
-            continue
-        used_censo.add(row.unique_id_censo)
-        used_cpf.add(row.unique_id_cpf)
-        kept.append(
-            {
-                "unique_id_censo": row.unique_id_censo,
-                "unique_id_cpf": row.unique_id_cpf,
-                "match_probability": float(row.match_probability),
-                "cluster_id": row.cluster_id,
-                "tipo_cluster": row.tipo,
-            }
-        )
-    out = pd.DataFrame(
-        kept,
-        columns=[
-            "unique_id_censo",
-            "unique_id_cpf",
-            "match_probability",
-            "cluster_id",
-            "tipo_cluster",
-        ],
-    )
-    con.register("_atribuicao_df", out)
-    con.execute(f"CREATE OR REPLACE TABLE {out_table} AS SELECT * FROM _atribuicao_df")
-    con.unregister("_atribuicao_df")
-    return {
-        "n_candidatos": int(len(candidatos)),
-        "n_atribuidos": int(len(out)),
-        "threshold": t,
     }
 
 
 def drop_splink_temp_tables(con: duckdb.DuckDBPyConnection) -> int:
     """Remove tabelas/views `__splink__*` residuais do DuckDB persistente.
 
-    Rodadas anteriores (ou restart do kernel) deixam `__splink__df_representatives_*`
-    etc. no arquivo. O Splink tenta dropar essas tabelas no clustering/predict, mas
+    Rodadas anteriores (ou restart do kernel) deixam `__splink__df_predict_*`
+    etc. no arquivo. O Splink tenta dropar essas tabelas no predict, mas
     marca `created_by_splink=False` para o que não criou nesta sessão e levanta
     ValueError. Limpar antes de criar o Linker evita o erro.
     """
