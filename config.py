@@ -192,7 +192,7 @@ def set_filtros(
 #
 # OUTPUT_DIR_BASE, OUTPUT_DIR (subdir do recorte), CENSO_DIR, CENSO_RAW_DIR,
 # CENSO_PESSOAS_ARQUIVO, CPF_ARQUIVO, COHORT_DIR, COHORT_DEDUP_ARQUIVO,
-# DUCKDB_TEMP_DIR, DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
+# LISTA_OURO_ARQUIVO, DUCKDB_TEMP_DIR, DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
 
 PROB_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR_BASE = Path(
@@ -204,6 +204,8 @@ CENSO_REGISTROS: Path
 CPF_REGISTROS: Path
 CENSO_LIMPO: Path
 CPF_LIMPO: Path
+CENSO_LIMPO_APLICACAO: Path
+CPF_LIMPO_APLICACAO: Path
 SPLINK_MODEL_JSON: Path
 SPLINK_PREDICTIONS: Path
 SPLINK_ATRIBUICAO: Path
@@ -245,11 +247,16 @@ COHORT_DEDUP_ARQUIVO = Path(
     os.environ.get("COHORT_DEDUP_ARQUIVO", COHORT_DIR / "cohort_dedup.parquet")
 ).expanduser()
 
+LISTA_OURO_ARQUIVO = Path(
+    os.environ.get("LISTA_OURO_ARQUIVO", COHORT_DIR / "lista_ouro.parquet")
+).expanduser()
+
 
 def refresh_output_paths() -> Path:
     """OUTPUT_DIR = OUTPUT_DIR_BASE / slug do filtro; rebind de DuckDB e parquets."""
     global OUTPUT_DIR, DUCKDB_ARQUIVO, CENSO_REGISTROS, CPF_REGISTROS
-    global CENSO_LIMPO, CPF_LIMPO, SPLINK_MODEL_JSON, SPLINK_PREDICTIONS
+    global CENSO_LIMPO, CPF_LIMPO, CENSO_LIMPO_APLICACAO, CPF_LIMPO_APLICACAO
+    global SPLINK_MODEL_JSON, SPLINK_PREDICTIONS
     global SPLINK_ATRIBUICAO
     OUTPUT_DIR = OUTPUT_DIR_BASE / recorte_output_slug()
     DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
@@ -257,6 +264,8 @@ def refresh_output_paths() -> Path:
     CPF_REGISTROS = OUTPUT_DIR / "cpf_registros.parquet"
     CENSO_LIMPO = OUTPUT_DIR / "censo_limpo.parquet"
     CPF_LIMPO = OUTPUT_DIR / "cpf_limpo.parquet"
+    CENSO_LIMPO_APLICACAO = OUTPUT_DIR / "censo_limpo_aplicacao.parquet"
+    CPF_LIMPO_APLICACAO = OUTPUT_DIR / "cpf_limpo_aplicacao.parquet"
     SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
     SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
     SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
@@ -270,6 +279,8 @@ TABELA_CENSO_REGISTROS = "censo_registros"
 TABELA_CPF_REGISTROS = "cpf_registros"
 TABELA_CENSO_LIMPA = "censo_limpo"
 TABELA_CPF_LIMPA = "cpf_limpo"
+TABELA_CENSO_LIMPA_APLICACAO = "censo_limpo_aplicacao"
+TABELA_CPF_LIMPA_APLICACAO = "cpf_limpo_aplicacao"
 
 # JSON no treino (02); predictions na aplicação (02b); 03 avalia; 04 exporta a lista
 MODELS_DIR = PROB_DIR / "models"
@@ -716,7 +727,8 @@ def materialize_splink_input(
     """View `splink_input` = UNION das duas bases limpas (+ partes DOB se faltarem).
 
     Prefere `censo_limpo` / `cpf_limpo`. Se faltarem, cai nas tabelas do NB00
-    (ainda com sentinelas) e avisa.
+    (ainda com sentinelas) e avisa. Tabelas de aplicação (`*_limpo_aplicacao`)
+    não disparam o aviso.
     """
     tabelas = list_tables(con)
     censo = censo_table or (
@@ -732,7 +744,7 @@ def materialize_splink_input(
             f"Tabelas ausentes para Splink: censo={censo!r}, cpf={cpf!r}. "
             "Rode o NB00 e o NB00b."
         )
-    if censo != TABELA_CENSO_LIMPA or cpf != TABELA_CPF_LIMPA:
+    if censo == TABELA_CENSO_REGISTROS or cpf == TABELA_CPF_REGISTROS:
         print(
             f"AVISO: usando {censo}/{cpf} em vez de "
             f"{TABELA_CENSO_LIMPA}/{TABELA_CPF_LIMPA} — "
@@ -1155,6 +1167,8 @@ def require_tables(
         TABELA_CPF_REGISTROS: CPF_REGISTROS,
         TABELA_CENSO_LIMPA: CENSO_LIMPO,
         TABELA_CPF_LIMPA: CPF_LIMPO,
+        TABELA_CENSO_LIMPA_APLICACAO: CENSO_LIMPO_APLICACAO,
+        TABELA_CPF_LIMPA_APLICACAO: CPF_LIMPO_APLICACAO,
     }
     missing: list[str] = []
     for table in tables:
@@ -1186,6 +1200,11 @@ def print_paths() -> None:
     print("CENSO_PESSOAS_ARQUIVO:", CENSO_PESSOAS_ARQUIVO)
     print("CENSO_CEP_ARQUIVO:", CENSO_CEP_ARQUIVO)
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)
+    print("LISTA_OURO_ARQUIVO:", LISTA_OURO_ARQUIVO)
+    print("CENSO_LIMPO:", CENSO_LIMPO)
+    print("CPF_LIMPO:", CPF_LIMPO)
+    print("CENSO_LIMPO_APLICACAO:", CENSO_LIMPO_APLICACAO)
+    print("CPF_LIMPO_APLICACAO:", CPF_LIMPO_APLICACAO)
     print("FILTRO_UF:", FILTRO_UF)
     print("FILTRO_MUNICIPIO:", FILTRO_MUNICIPIO)
     print("ANO_OBITO_CORTE:", ANO_OBITO_CORTE)

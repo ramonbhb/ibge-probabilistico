@@ -19,6 +19,7 @@ from config import (  # noqa: E402
     ano_nascimento_sql,
     sem_nome_sql,
     cep_valido_sql,
+    cpf_norm_sql,
     dia_nascimento_sql,
     dob_valida_sql,
     limpeza_columns_sql,
@@ -346,3 +347,94 @@ def test_materialize_splink_input_nao_duplica_partes(con, monkeypatch) -> None:
         f"FROM {SPLINK_INPUT_VIEW} WHERE unique_id = 'c1'"
     ).fetchone()
     assert row == ("05", "07", None)
+
+
+def test_materialize_aviso_so_em_registros(con, capsys) -> None:
+    schema = "unique_id VARCHAR, origem VARCHAR, data_nascimento VARCHAR"
+    con.execute(f"CREATE TABLE censo_limpo_aplicacao ({schema})")
+    con.execute(f"CREATE TABLE cpf_limpo_aplicacao ({schema})")
+    materialize_splink_input(
+        con,
+        censo_table="censo_limpo_aplicacao",
+        cpf_table="cpf_limpo_aplicacao",
+    )
+    assert "AVISO" not in capsys.readouterr().out
+
+    con.execute(f"CREATE TABLE censo_registros ({schema})")
+    con.execute(f"CREATE TABLE cpf_registros ({schema})")
+    materialize_splink_input(
+        con, censo_table="censo_registros", cpf_table="cpf_registros"
+    )
+    assert "AVISO" in capsys.readouterr().out
+
+
+def test_tabelas_aplicacao_sem_lista_ouro(con, tmp_path) -> None:
+    con.execute(
+        """
+        CREATE TABLE censo_limpo AS SELECT * FROM (VALUES
+            ('c1', '111'),
+            ('c2', '222'),
+            ('c3', CAST(NULL AS VARCHAR))
+        ) v(unique_id, person_id_censo)
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE cpf_limpo AS SELECT * FROM (VALUES
+            ('p1', '12345678901'),
+            ('p2', '99999999999'),
+            ('p3', CAST(NULL AS VARCHAR))
+        ) v(unique_id, cpf_norm)
+        """
+    )
+    ouro = tmp_path / "lista_ouro.parquet"
+    con.execute(
+        f"""
+        COPY (
+            SELECT * FROM (VALUES
+                (111, '123.456.789-01')
+            ) v(id_censo, id_cpf)
+        ) TO '{ouro}' (FORMAT PARQUET)
+        """
+    )
+
+    con.execute(f"""
+    CREATE OR REPLACE TABLE lista_ouro AS
+    SELECT
+        CAST(id_censo AS VARCHAR) AS id_censo,
+        {cpf_norm_sql('id_cpf')} AS cpf_norm
+    FROM read_parquet('{ouro}')
+    """)
+    con.execute("""
+    CREATE OR REPLACE TABLE censo_limpo_aplicacao AS
+    SELECT *
+    FROM censo_limpo
+    WHERE person_id_censo IS NULL
+       OR CAST(person_id_censo AS VARCHAR) NOT IN (
+           SELECT id_censo FROM lista_ouro WHERE id_censo IS NOT NULL
+       )
+    """)
+    con.execute("""
+    CREATE OR REPLACE TABLE cpf_limpo_aplicacao AS
+    SELECT *
+    FROM cpf_limpo
+    WHERE cpf_norm IS NULL
+       OR cpf_norm NOT IN (
+           SELECT cpf_norm FROM lista_ouro WHERE cpf_norm IS NOT NULL
+       )
+    """)
+
+    censo_ids = {
+        r[0]
+        for r in con.execute(
+            "SELECT unique_id FROM censo_limpo_aplicacao"
+        ).fetchall()
+    }
+    cpf_ids = {
+        r[0]
+        for r in con.execute(
+            "SELECT unique_id FROM cpf_limpo_aplicacao"
+        ).fetchall()
+    }
+    assert censo_ids == {"c2", "c3"}
+    assert cpf_ids == {"p2", "p3"}
