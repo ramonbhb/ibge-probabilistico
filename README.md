@@ -53,7 +53,7 @@ export DUCKDB_MEMORY_LIMIT=370GB   # Splink/DuckDB
 export THRESHOLD_AVALIACAO=0.99    # avaliação 03, export 04
 ```
 
-Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_ARQUIVO` (default `~/singed/bases/raw/censo/data_cep_uniq.csv`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `LISTA_OURO_ARQUIVO` (default `COHORT_DIR/lista_ouro.parquet`), `DUCKDB_TEMP_DIR`.
+Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_ARQUIVO` (default `~/singed/bases/raw/censo/data_cep_uniq.csv`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `LISTA_OURO_ARQUIVO` (default `~/capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet`), `DUCKDB_TEMP_DIR`.
 
 ## Notebooks
 
@@ -61,7 +61,8 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 |----------|--------|
 | [`00_preparar_bases.ipynb`](notebooks/00_preparar_bases.ipynb) | Bronze → filtro UF/município → mãe → CEP → CPF da coorte no Censo → `censo_registros` + `cpf_registros` (sem stack) |
 | [`00b_limpar_dados.ipynb`](notebooks/00b_limpar_dados.ipynb) | Limpa cada base → `censo_limpo` / `cpf_limpo`; óbito ≤ corte; sem nome; sentinelas → NULL; re-carimba CPF da coorte; tira lista de ouro → `*_limpo_aplicacao` |
-| [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual: missing, top nomes, sexo, DOB, idade, CEP, UF, município |
+| [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual do limpo cheio (treino): missing, top nomes, sexo, DOB, idade, CEP, UF, município |
+| [`01b_analise_descritiva_aplicacao.ipynb`](notebooks/01b_analise_descritiva_aplicacao.ipynb) | Mesma EDA no limpo sem ouro determinístico (`*_limpo_aplicacao`) |
 | [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb) | Profile + treino `link_only` (comparisons, prior, EM) → `splink_model.json` |
 | [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | 12 regras de predição + JSON do 02 → `predict(0,5)` no limpo sem ouro → parquet estreito (sem clustering) |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Funil do Censo, exemplos ≥ T e faixa, melhor CPF, discordância nome/DOB, ouro em cinco cortes, 1:1 abaixo de T |

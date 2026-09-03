@@ -248,7 +248,11 @@ COHORT_DEDUP_ARQUIVO = Path(
 ).expanduser()
 
 LISTA_OURO_ARQUIVO = Path(
-    os.environ.get("LISTA_OURO_ARQUIVO", COHORT_DIR / "lista_ouro.parquet")
+    os.environ.get(
+        "LISTA_OURO_ARQUIVO",
+        Path.home()
+        / "capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet",
+    )
 ).expanduser()
 
 

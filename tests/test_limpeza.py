@@ -393,7 +393,7 @@ def test_tabelas_aplicacao_sem_lista_ouro(con, tmp_path) -> None:
         COPY (
             SELECT * FROM (VALUES
                 (111, '123.456.789-01')
-            ) v(id_censo, id_cpf)
+            ) v("ID_MORADOR", "cpf_cpf")
         ) TO '{ouro}' (FORMAT PARQUET)
         """
     )
@@ -401,8 +401,8 @@ def test_tabelas_aplicacao_sem_lista_ouro(con, tmp_path) -> None:
     con.execute(f"""
     CREATE OR REPLACE TABLE lista_ouro AS
     SELECT
-        CAST(id_censo AS VARCHAR) AS id_censo,
-        {cpf_norm_sql('id_cpf')} AS cpf_norm
+        CAST("ID_MORADOR" AS VARCHAR) AS id_censo,
+        {cpf_norm_sql('"cpf_cpf"')} AS cpf_norm
     FROM read_parquet('{ouro}')
     """)
     con.execute("""
