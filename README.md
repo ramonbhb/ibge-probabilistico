@@ -2,7 +2,7 @@
 
 Pipeline interativo (notebooks + DuckDB) para preparar **bases bronze** CPF e Censo (sem empilhar), rodar **Splink link_only** (Censo × CPF) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
 
-Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON e aplica as 12 regras de predição. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (pares, melhor nota, recall ouro nas únicas). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) (só associações 1:1). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99).
+Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON e aplica as 12 regras de predição. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (pares, melhor nota, recall ouro nas únicas). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) (até 3 Censos por CPF). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99). O [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) acrescenta pares na faixa `[0,95, T)` em funil: `nome_mae_phon`; senão nome completo + CEP; senão pontas + CEP.
 
 ## Pré-requisitos
 
@@ -27,7 +27,7 @@ SEXO_VALIDOS = ("M", "F")                     # fora daqui o sexo vira NULL
 Cada eixo aceita **escalar ou lista**. O recorte usual é **só um** (UF *ou* município). Se os dois estiverem preenchidos, a cláusula é AND (como antes).
 
 `ANO_OBITO_CORTE = 0` desliga o filtro de óbito (a regra exige `ano > 0` e `ano <= corte`). Subir o corte (ex. 2030) remove **mais** gente, não desliga.
-Corte operacional (`THRESHOLD_AVALIACAO`, default 0,99): avaliação 03 e export 04. Também `export THRESHOLD_AVALIACAO=0.98`.
+Corte operacional (`THRESHOLD_AVALIACAO`, default 0,99): avaliação 03 e export 04. Faixa do 05: `THRESHOLD_REGRAS` (default 0,95). Teto `MAX_CENSOS_POR_CPF` (default 3). Também `export THRESHOLD_AVALIACAO=0.98`.
 
 Não existem `export FILTRO_UF` / `export FILTRO_MUNICIPIO`: filtro é parâmetro de análise, não configuração de ambiente.
 
@@ -66,13 +66,14 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb) | Profile + treino `link_only` (comparisons, prior, EM) → `splink_model.json` |
 | [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | 12 regras de predição + JSON do 02 → `predict(0,5)` no limpo sem ouro → parquet estreito (sem clustering) |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Funil do Censo, exemplos ≥ T e faixa, melhor CPF, discordância nome/DOB, ouro em cinco cortes, 1:1 abaixo de T |
-| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Exporta só associações únicas (`splink_atribuicao.parquet`) |
+| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Melhor CPF em `p ≥ T`; até 3 Censos por CPF (`splink_atribuicao.parquet`) |
+| [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) | Funil na faixa `[0,95, T)`: mãe fonética; senão nome+CEP; senão pontas+CEP (até 3 Censos/CPF) |
 
-**Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` exportar lista.
+**Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` exportar lista → `05` regras na faixa.
 
 Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_input` (view `splink_input`). Treino no limpo; predict no limpo sem ouro determinístico (`censo_limpo_aplicacao` / `cpf_limpo_aplicacao`). Sem `registro_unificado` / `registro_limpo` empilhados.
 
-`predict()` no `02b_aplicar` gera pares ≥0,5 e grava parquet estreito (ids + score); **não clusteriza**. Corte `THRESHOLD_AVALIACAO` (default 0,99) entra no 03/04. Se o JSON não existir, o `02b` falha apontando o notebook de treino. O 04 não depende das células do 03.
+`predict()` no `02b_aplicar` gera pares ≥0,5 e grava parquet estreito (ids + score); **não clusteriza**. Corte `THRESHOLD_AVALIACAO` (default 0,99) entra no 03/04; o 05 usa `THRESHOLD_REGRAS` (default 0,95) só para acrescentar pares com regra. Se o JSON não existir, o `02b` falha apontando o notebook de treino. O 04 e o 05 não dependem das células do 03.
 
 **1ª passada do modelo (`02_treinar`):** comparisons, prior e EM estão nas células do [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). O [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) carrega o JSON e aplica as 12 regras de predição (não estão no treino). Sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes no score: `nome_completo_phon`, `primeiro_nome_phon` e `ultimo_nome_phon` (exact + Jaro-Winkler 0,95 e 0,92 + TF em cada um). Meio e o composto `primeiro_ultimo*` ficam nas tabelas; **não** entram no comparison. Primeiro e último também entram no blocking de predição. DOB: uma comparison (`data_nascimento`) com Null custom → Exact ISO + TF → Damerau ≤ 1 → mês e dia iguais → ELSE `m=1e-6` fixo. Partes da data (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) entram no blocking e no nível mês/dia da comparison; Damerau na string ISO pega transposições `01`↔`10`. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`; ELSE `m=1e-6` fixo (só pesa quando a idade do Censo não é nula). UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra em quatro regras de predição (`ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+cep`, DOB+CEP, DOB+UF+sexo+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
 

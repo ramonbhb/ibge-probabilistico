@@ -121,9 +121,15 @@ DATA_REFERENCIA_IDADE = "2022-08-01"
 # anulá-la joga sinal fora.
 SEXO_VALIDOS = ("M", "F")
 
-# Corte operacional: avaliação (03) e export da lista única (04).
+# Corte operacional: avaliação (03) e export da lista (04).
 # Override: export THRESHOLD_AVALIACAO=0.98
 THRESHOLD_AVALIACAO = float(os.environ.get("THRESHOLD_AVALIACAO", "0.99"))
+
+# Faixa do 05: p >= THRESHOLD_REGRAS e p < THRESHOLD_AVALIACAO, se regra extra.
+THRESHOLD_REGRAS = float(os.environ.get("THRESHOLD_REGRAS", "0.95"))
+
+# CPF com 1–3 Censos no topo fica (duplicata possível); 4+ anula o grupo.
+MAX_CENSOS_POR_CPF = int(os.environ.get("MAX_CENSOS_POR_CPF", "3"))
 
 # Chunks opcionais do predict() Splink (volume grande). None = default da lib.
 # Override: export PREDICT_NUM_CHUNKS_LEFT=4 PREDICT_NUM_CHUNKS_RIGHT=4
@@ -209,6 +215,7 @@ CPF_LIMPO_APLICACAO: Path
 SPLINK_MODEL_JSON: Path
 SPLINK_PREDICTIONS: Path
 SPLINK_ATRIBUICAO: Path
+SPLINK_ATRIBUICAO_REGRAS: Path
 
 CENSO_DIR = Path(
     os.environ.get("CENSO_DIR", Path.home() / "singed/bases/bronze/censo")
@@ -261,7 +268,7 @@ def refresh_output_paths() -> Path:
     global OUTPUT_DIR, DUCKDB_ARQUIVO, CENSO_REGISTROS, CPF_REGISTROS
     global CENSO_LIMPO, CPF_LIMPO, CENSO_LIMPO_APLICACAO, CPF_LIMPO_APLICACAO
     global SPLINK_MODEL_JSON, SPLINK_PREDICTIONS
-    global SPLINK_ATRIBUICAO
+    global SPLINK_ATRIBUICAO, SPLINK_ATRIBUICAO_REGRAS
     OUTPUT_DIR = OUTPUT_DIR_BASE / recorte_output_slug()
     DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
     CENSO_REGISTROS = OUTPUT_DIR / "censo_registros.parquet"
@@ -273,6 +280,7 @@ def refresh_output_paths() -> Path:
     SPLINK_MODEL_JSON = OUTPUT_DIR / "splink_model.json"
     SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
     SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
+    SPLINK_ATRIBUICAO_REGRAS = OUTPUT_DIR / "splink_atribuicao_regras.parquet"
     return OUTPUT_DIR
 
 
@@ -1216,4 +1224,8 @@ def print_paths() -> None:
     print("DATA_REFERENCIA_IDADE:", DATA_REFERENCIA_IDADE)
     print("SEXO_VALIDOS:", SEXO_VALIDOS)
     print("THRESHOLD_AVALIACAO:", THRESHOLD_AVALIACAO)
+    print("THRESHOLD_REGRAS:", THRESHOLD_REGRAS)
+    print("MAX_CENSOS_POR_CPF:", MAX_CENSOS_POR_CPF)
+    print("SPLINK_ATRIBUICAO:", SPLINK_ATRIBUICAO)
+    print("SPLINK_ATRIBUICAO_REGRAS:", SPLINK_ATRIBUICAO_REGRAS)
     print("DUCKDB_ARQUIVO:", DUCKDB_ARQUIVO)

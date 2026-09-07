@@ -1,25 +1,58 @@
-"""Melhor nota por Censo; única = CPF com um só Censo no topo."""
+"""Melhor nota por Censo; lista = CPF com até MAX_CENSOS_POR_CPF Censos no topo."""
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import duckdb
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-def _melhor_e_unicas(con: duckdb.DuckDBPyConnection, threshold: float = 0.95) -> None:
+from config import MAX_CENSOS_POR_CPF
+
+
+def _criar_pessoas(con: duckdb.DuckDBPyConnection, rows: list[tuple] | None = None) -> None:
+    con.execute(
+        "CREATE TABLE pessoas (unique_id VARCHAR, cep VARCHAR, nome_mae_phon VARCHAR)"
+    )
+    if rows:
+        con.executemany("INSERT INTO pessoas VALUES (?, ?, ?)", rows)
+
+
+def _melhor_e_lista(
+    con: duckdb.DuckDBPyConnection,
+    threshold: float = 0.95,
+    max_censos: int = MAX_CENSOS_POR_CPF,
+) -> None:
     con.execute(
         f"""
         CREATE OR REPLACE TABLE melhor_por_censo AS
-        SELECT unique_id_censo, unique_id_cpf, match_probability
-        FROM splink_predictions
-        WHERE match_probability >= {threshold}
+        SELECT p.unique_id_censo, p.unique_id_cpf, p.match_probability
+        FROM splink_predictions p
+        LEFT JOIN pessoas ca ON ca.unique_id = p.unique_id_censo
+        LEFT JOIN pessoas pb ON pb.unique_id = p.unique_id_cpf
+        WHERE p.match_probability >= {threshold}
         QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY unique_id_censo
-            ORDER BY match_probability DESC, unique_id_cpf
+            PARTITION BY p.unique_id_censo
+            ORDER BY
+                p.match_probability DESC,
+                (
+                    CAST(
+                        ca.cep IS NOT NULL AND pb.cep IS NOT NULL
+                        AND ca.cep = pb.cep AS INTEGER
+                    )
+                    + CAST(
+                        ca.nome_mae_phon IS NOT NULL AND pb.nome_mae_phon IS NOT NULL
+                        AND ca.nome_mae_phon = pb.nome_mae_phon AS INTEGER
+                    )
+                ) DESC,
+                p.unique_id_cpf
         ) = 1
         """
     )
     con.execute(
-        """
+        f"""
         CREATE OR REPLACE TABLE associacoes_unicas AS
         SELECT m.*
         FROM melhor_por_censo m
@@ -27,7 +60,7 @@ def _melhor_e_unicas(con: duckdb.DuckDBPyConnection, threshold: float = 0.95) ->
             SELECT unique_id_cpf
             FROM melhor_por_censo
             GROUP BY 1
-            HAVING COUNT(*) = 1
+            HAVING COUNT(*) <= {max_censos}
         ) c ON c.unique_id_cpf = m.unique_id_cpf
         """
     )
@@ -42,9 +75,10 @@ def _rows(con: duckdb.DuckDBPyConnection, table: str) -> dict[str, str]:
     }
 
 
-def test_melhor_nota_cpf_compartilhado_nao_e_unica() -> None:
-    """C1-X 0,99, C2-X 0,98, C2-Y 0,97 → C2 fica com X; X tem 2 Censos; única vazia."""
+def test_dois_censos_mesmo_cpf_ficam() -> None:
+    """C1-X 0,99, C2-X 0,98 → os dois ficam (n_censo = 2 ≤ 3)."""
     con = duckdb.connect()
+    _criar_pessoas(con)
     con.execute(
         """
         CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
@@ -54,22 +88,58 @@ def test_melhor_nota_cpf_compartilhado_nao_e_unica() -> None:
         ) v(unique_id_censo, unique_id_cpf, match_probability)
         """
     )
-    _melhor_e_unicas(con)
+    _melhor_e_lista(con)
     melhor = _rows(con, "melhor_por_censo")
-    unicas = _rows(con, "associacoes_unicas")
-    n_x = con.execute(
-        "SELECT n_censo FROM ("
-        "  SELECT unique_id_cpf, COUNT(*) AS n_censo FROM melhor_por_censo GROUP BY 1"
-        ") WHERE unique_id_cpf = 'cpf_X'"
-    ).fetchone()[0]
+    lista = _rows(con, "associacoes_unicas")
     con.close()
     assert melhor == {"censo_A": "cpf_X", "censo_B": "cpf_X"}
-    assert unicas == {}
-    assert n_x == 2
+    assert lista == {"censo_A": "cpf_X", "censo_B": "cpf_X"}
 
 
-def test_dois_pares_distintos_sao_unicas() -> None:
+def test_tres_censos_mesmo_cpf_ficam() -> None:
     con = duckdb.connect()
+    _criar_pessoas(con)
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99),
+            ('censo_B', 'cpf_X', 0.98),
+            ('censo_C', 'cpf_X', 0.97)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    lista = _rows(con, "associacoes_unicas")
+    con.close()
+    assert lista == {
+        "censo_A": "cpf_X",
+        "censo_B": "cpf_X",
+        "censo_C": "cpf_X",
+    }
+
+
+def test_quatro_censos_mesmo_cpf_saem_todos() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(con)
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99),
+            ('censo_B', 'cpf_X', 0.98),
+            ('censo_C', 'cpf_X', 0.97),
+            ('censo_D', 'cpf_X', 0.96)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    lista = _rows(con, "associacoes_unicas")
+    con.close()
+    assert lista == {}
+
+
+def test_dois_pares_distintos_entram() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(con)
     con.execute(
         """
         CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
@@ -78,14 +148,39 @@ def test_dois_pares_distintos_sao_unicas() -> None:
         ) v(unique_id_censo, unique_id_cpf, match_probability)
         """
     )
-    _melhor_e_unicas(con)
-    unicas = _rows(con, "associacoes_unicas")
+    _melhor_e_lista(con)
+    lista = _rows(con, "associacoes_unicas")
     con.close()
-    assert unicas == {"censo_A": "cpf_X", "censo_B": "cpf_Y"}
+    assert lista == {"censo_A": "cpf_X", "censo_B": "cpf_Y"}
 
 
-def test_empate_desempata_por_unique_id_cpf() -> None:
+def test_empate_p_escolhe_cep_e_mae_phon() -> None:
     con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", "80000000", "MARIA"),
+            ("cpf_X", "00000001", "JOANA"),
+            ("cpf_Z", "80000000", "MARIA"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99),
+            ('censo_A', 'cpf_Z', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {"censo_A": "cpf_Z"}
+
+
+def test_empate_p_e_atributos_cai_no_unique_id_cpf() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(con)
     con.execute(
         """
         CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
@@ -94,9 +189,9 @@ def test_empate_desempata_por_unique_id_cpf() -> None:
         ) v(unique_id_censo, unique_id_cpf, match_probability)
         """
     )
-    _melhor_e_unicas(con)
+    _melhor_e_lista(con)
     melhor = _rows(con, "melhor_por_censo")
-    unicas = _rows(con, "associacoes_unicas")
+    lista = _rows(con, "associacoes_unicas")
     con.close()
     assert melhor == {"censo_A": "cpf_W"}
-    assert unicas == {"censo_A": "cpf_W"}
+    assert lista == {"censo_A": "cpf_W"}
