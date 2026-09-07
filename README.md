@@ -2,7 +2,7 @@
 
 Pipeline interativo (notebooks + DuckDB) para preparar **bases bronze** CPF e Censo (sem empilhar), rodar **Splink link_only** (Censo × CPF) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
 
-Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON e aplica as 11 regras de predição. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (pares, melhor nota, recall ouro nas únicas). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) (até 3 Censos por CPF). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99). O [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) acrescenta pares na faixa `[0,95, T)` em funil: `nome_mae_phon` (igual ou prefixo de `n ≥ 2` tokens); senão nome completo + CEP; senão pontas + CEP. No 04, par com mães preenchidas e incompatíveis não compete.
+Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON e aplica as 11 regras de predição. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (pares, melhor nota, recall ouro nas únicas). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) (até 3 Censos por CPF). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99). O [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) acrescenta pares na faixa `[0,95, T)` em funil: `nome_mae_phon` (igual ou prefixo de `n ≥ 2` tokens); senão nome completo + CEP; senão pontas + CEP. No 04, par com mães preenchidas e incompatíveis não compete, salvo nome fonético e DOB iguais.
 
 ## Pré-requisitos
 
@@ -66,7 +66,7 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb) | Profile + treino `link_only` (comparisons, prior, EM) → `splink_model.json` |
 | [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | 11 regras de predição + JSON do 02 → `predict(0,5)` no limpo sem ouro → parquet estreito (sem clustering) |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Funil do Censo, exemplos ≥ T e faixa, melhor CPF, discordância nome/DOB, ouro em cinco cortes, 1:1 abaixo de T |
-| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Melhor CPF em `p ≥ T`; veto de mãe incompatível; até 3 Censos por CPF (`splink_atribuicao.parquet`) |
+| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Melhor CPF em `p ≥ T`; veto de mãe incompatível (salvo nome+DOB iguais); até 3 Censos por CPF (`splink_atribuicao.parquet`) |
 | [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) | Funil na faixa `[0,95, T)`: mãe (igual ou prefixo `n ≥ 2`); senão nome+CEP; senão pontas+CEP |
 
 **Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` exportar lista → `05` regras na faixa.

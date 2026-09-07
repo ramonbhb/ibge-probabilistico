@@ -14,10 +14,19 @@ from config import MAX_CENSOS_POR_CPF
 
 def _criar_pessoas(con: duckdb.DuckDBPyConnection, rows: list[tuple] | None = None) -> None:
     con.execute(
-        "CREATE TABLE pessoas (unique_id VARCHAR, cep VARCHAR, nome_mae_phon VARCHAR)"
+        """
+        CREATE TABLE pessoas (
+            unique_id VARCHAR,
+            cep VARCHAR,
+            nome_mae_phon VARCHAR,
+            nome_completo_phon VARCHAR,
+            data_nascimento VARCHAR
+        )
+        """
     )
     if rows:
-        con.executemany("INSERT INTO pessoas VALUES (?, ?, ?)", rows)
+        filled = [tuple(r) + (None,) * (5 - len(r)) for r in rows]
+        con.executemany("INSERT INTO pessoas VALUES (?, ?, ?, ?, ?)", filled)
 
 
 def _melhor_e_lista(
@@ -57,6 +66,14 @@ def _melhor_e_lista(
                             len(string_split(pb.nome_mae_phon, ' '))
                         )
                     )
+                )
+                OR (
+                    ca.nome_completo_phon IS NOT NULL
+                    AND pb.nome_completo_phon IS NOT NULL
+                    AND ca.nome_completo_phon = pb.nome_completo_phon
+                    AND ca.data_nascimento IS NOT NULL
+                    AND pb.data_nascimento IS NOT NULL
+                    AND ca.data_nascimento = pb.data_nascimento
                 )
           )
         QUALIFY ROW_NUMBER() OVER (
@@ -360,3 +377,69 @@ def test_empate_prefixo_mae_vence() -> None:
     melhor = _rows(con, "melhor_por_censo")
     con.close()
     assert melhor == {"censo_A": "cpf_Z"}
+
+
+def test_mae_discorda_nome_e_dob_iguais_nao_veta() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA JOANA CORREA", "JOAO SILVA", "1990-01-15"),
+            ("cpf_X", None, "PEDRO SOUZA", "JOAO SILVA", "1990-01-15"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {"censo_A": "cpf_X"}
+
+
+def test_mae_discorda_nome_igual_dob_diferente_veta() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA JOANA CORREA", "JOAO SILVA", "1990-01-15"),
+            ("cpf_X", None, "PEDRO SOUZA", "JOAO SILVA", "1991-01-15"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {}
+
+
+def test_mae_discorda_dob_igual_nome_diferente_veta() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA JOANA CORREA", "JOAO SILVA", "1990-01-15"),
+            ("cpf_X", None, "PEDRO SOUZA", "JOAO SANTOS", "1990-01-15"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {}
