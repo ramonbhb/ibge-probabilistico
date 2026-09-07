@@ -33,6 +33,32 @@ def _melhor_e_lista(
         LEFT JOIN pessoas ca ON ca.unique_id = p.unique_id_censo
         LEFT JOIN pessoas pb ON pb.unique_id = p.unique_id_cpf
         WHERE p.match_probability >= {threshold}
+          AND (
+                ca.nome_mae_phon IS NULL
+                OR pb.nome_mae_phon IS NULL
+                OR ca.nome_mae_phon = pb.nome_mae_phon
+                OR (
+                    least(
+                        len(string_split(ca.nome_mae_phon, ' ')),
+                        len(string_split(pb.nome_mae_phon, ' '))
+                    ) >= 2
+                    AND list_slice(
+                        string_split(ca.nome_mae_phon, ' '),
+                        1,
+                        least(
+                            len(string_split(ca.nome_mae_phon, ' ')),
+                            len(string_split(pb.nome_mae_phon, ' '))
+                        )
+                    ) = list_slice(
+                        string_split(pb.nome_mae_phon, ' '),
+                        1,
+                        least(
+                            len(string_split(ca.nome_mae_phon, ' ')),
+                            len(string_split(pb.nome_mae_phon, ' '))
+                        )
+                    )
+                )
+          )
         QUALIFY ROW_NUMBER() OVER (
             PARTITION BY p.unique_id_censo
             ORDER BY
@@ -44,7 +70,30 @@ def _melhor_e_lista(
                     )
                     + CAST(
                         ca.nome_mae_phon IS NOT NULL AND pb.nome_mae_phon IS NOT NULL
-                        AND ca.nome_mae_phon = pb.nome_mae_phon AS INTEGER
+                        AND (
+                            ca.nome_mae_phon = pb.nome_mae_phon
+                            OR (
+                                least(
+                                    len(string_split(ca.nome_mae_phon, ' ')),
+                                    len(string_split(pb.nome_mae_phon, ' '))
+                                ) >= 2
+                                AND list_slice(
+                                    string_split(ca.nome_mae_phon, ' '),
+                                    1,
+                                    least(
+                                        len(string_split(ca.nome_mae_phon, ' ')),
+                                        len(string_split(pb.nome_mae_phon, ' '))
+                                    )
+                                ) = list_slice(
+                                    string_split(pb.nome_mae_phon, ' '),
+                                    1,
+                                    least(
+                                        len(string_split(ca.nome_mae_phon, ' ')),
+                                        len(string_split(pb.nome_mae_phon, ' '))
+                                    )
+                                )
+                            )
+                        ) AS INTEGER
                     )
                 ) DESC,
                 p.unique_id_cpf
@@ -195,3 +244,119 @@ def test_empate_p_e_atributos_cai_no_unique_id_cpf() -> None:
     con.close()
     assert melhor == {"censo_A": "cpf_W"}
     assert lista == {"censo_A": "cpf_W"}
+
+
+def test_veto_mae_escolhe_segundo() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA JOANA CORREA"),
+            ("cpf_X", None, "PEDRO SOUZA"),
+            ("cpf_Z", None, "MARIA JOANA CORREA SILVA"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.995),
+            ('censo_A', 'cpf_Z', 0.991)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {"censo_A": "cpf_Z"}
+
+
+def test_veto_mae_ambos_discordam_sai() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA JOANA CORREA"),
+            ("cpf_X", None, "PEDRO SOUZA"),
+            ("cpf_Z", None, "ANA LIMA"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.995),
+            ('censo_A', 'cpf_Z', 0.991)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {}
+
+
+def test_um_token_nao_prefixa_veta() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA"),
+            ("cpf_X", None, "MARIA SILVA"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {}
+
+
+def test_mae_nula_nao_veta() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, None),
+            ("cpf_X", None, "PEDRO SOUZA"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {"censo_A": "cpf_X"}
+
+
+def test_empate_prefixo_mae_vence() -> None:
+    con = duckdb.connect()
+    _criar_pessoas(
+        con,
+        [
+            ("censo_A", None, "MARIA JOANA CORREA"),
+            ("cpf_X", None, "PEDRO SOUZA"),
+            ("cpf_Z", None, "MARIA JOANA CORREA SILVA"),
+        ],
+    )
+    con.execute(
+        """
+        CREATE TABLE splink_predictions AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.99),
+            ('censo_A', 'cpf_Z', 0.99)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    _melhor_e_lista(con)
+    melhor = _rows(con, "melhor_por_censo")
+    con.close()
+    assert melhor == {"censo_A": "cpf_Z"}

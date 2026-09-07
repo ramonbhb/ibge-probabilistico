@@ -2,7 +2,7 @@
 
 Pipeline interativo (notebooks + DuckDB) para preparar **bases bronze** CPF e Censo (sem empilhar), rodar **Splink link_only** (Censo × CPF) e avaliar contra **ground truth** da coorte (`cohort_dedup`).
 
-Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON e aplica as 12 regras de predição. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (pares, melhor nota, recall ouro nas únicas). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) (até 3 Censos por CPF). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99). O [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) acrescenta pares na faixa `[0,95, T)` em funil: `nome_mae_phon`; senão nome completo + CEP; senão pontas + CEP.
+Treino e validação são separados: o modelo é treinado sem ver a coorte (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON e aplica as 11 regras de predição. Avaliação no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (pares, melhor nota, recall ouro nas únicas). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) (até 3 Censos por CPF). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99). O [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) acrescenta pares na faixa `[0,95, T)` em funil: `nome_mae_phon` (igual ou prefixo de `n ≥ 2` tokens); senão nome completo + CEP; senão pontas + CEP. No 04, par com mães preenchidas e incompatíveis não compete.
 
 ## Pré-requisitos
 
@@ -64,10 +64,10 @@ Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_
 | [`01_analise_descritiva.ipynb`](notebooks/01_analise_descritiva.ipynb) | EDA visual do limpo cheio (treino): missing, top nomes, sexo, DOB, idade, CEP, UF, município |
 | [`01b_analise_descritiva_aplicacao.ipynb`](notebooks/01b_analise_descritiva_aplicacao.ipynb) | Mesma EDA no limpo sem ouro determinístico (`*_limpo_aplicacao`) |
 | [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb) | Profile + treino `link_only` (comparisons, prior, EM) → `splink_model.json` |
-| [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | 12 regras de predição + JSON do 02 → `predict(0,5)` no limpo sem ouro → parquet estreito (sem clustering) |
+| [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | 11 regras de predição + JSON do 02 → `predict(0,5)` no limpo sem ouro → parquet estreito (sem clustering) |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Funil do Censo, exemplos ≥ T e faixa, melhor CPF, discordância nome/DOB, ouro em cinco cortes, 1:1 abaixo de T |
-| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Melhor CPF em `p ≥ T`; até 3 Censos por CPF (`splink_atribuicao.parquet`) |
-| [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) | Funil na faixa `[0,95, T)`: mãe fonética; senão nome+CEP; senão pontas+CEP (até 3 Censos/CPF) |
+| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Melhor CPF em `p ≥ T`; veto de mãe incompatível; até 3 Censos por CPF (`splink_atribuicao.parquet`) |
+| [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) | Funil na faixa `[0,95, T)`: mãe (igual ou prefixo `n ≥ 2`); senão nome+CEP; senão pontas+CEP |
 
 **Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` avaliar → `04` exportar lista → `05` regras na faixa.
 
@@ -75,11 +75,11 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 
 `predict()` no `02b_aplicar` gera pares ≥0,5 e grava parquet estreito (ids + score); **não clusteriza**. Corte `THRESHOLD_AVALIACAO` (default 0,99) entra no 03/04; o 05 usa `THRESHOLD_REGRAS` (default 0,95) só para acrescentar pares com regra. Se o JSON não existir, o `02b` falha apontando o notebook de treino. O 04 e o 05 não dependem das células do 03.
 
-**1ª passada do modelo (`02_treinar`):** comparisons, prior e EM estão nas células do [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). O [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) carrega o JSON e aplica as 12 regras de predição (não estão no treino). Sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes no score: `nome_completo_phon`, `primeiro_nome_phon` e `ultimo_nome_phon` (exact + Jaro-Winkler 0,95 e 0,92 + TF em cada um). Meio e o composto `primeiro_ultimo*` ficam nas tabelas; **não** entram no comparison. Primeiro e último também entram no blocking de predição. DOB: uma comparison (`data_nascimento`) com Null custom → Exact ISO + TF → Damerau ≤ 1 → mês e dia iguais → ELSE `m=1e-6` fixo. Partes da data (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`) entram no blocking e no nível mês/dia da comparison; Damerau na string ISO pega transposições `01`↔`10`. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`; ELSE `m=1e-6` fixo (só pesa quando a idade do Censo não é nula). UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra em quatro regras de predição (`ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+cep`, DOB+CEP, DOB+UF+sexo+CEP) e no EM. **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
+**1ª passada do modelo (`02_treinar`):** comparisons, prior e EM estão nas células do [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). O [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) carrega o JSON e aplica as 11 regras de predição (não estão no treino). Sem `nome_mae*` (Censo ~34% preenchido no recorte MA; exact dava peso demais). Nomes no score: `nome_completo_phon`, `primeiro_nome_phon` e `ultimo_nome_phon` (exact + Jaro-Winkler 0,95 e 0,92 + TF em cada um). Meio e o composto `primeiro_ultimo*` ficam nas tabelas; **não** entram no comparison. Primeiro e último também entram no blocking de predição. DOB: uma comparison (`data_nascimento`) com Null custom → Exact ISO + TF → mês/dia e `|ano| ≤ 1` → Damerau ≤ 1 → ELSE `m=1e-6` fixo. `|Δano| > 1` (ex. 10 anos, mesmo aniversário) cai no ELSE e pune. Partes da data entram no blocking e no nível `|ano| ≤ 1`; Damerau na string ISO pega transposições `01`↔`10`. Não usamos `DateOfBirthComparison` (diffs de mês/ano em época). Idade: exact e `abs(diff) ≤ 1`; ELSE `m=1e-6` fixo (só pesa quando a idade do Censo não é nula). UF no score (`ExactMatch` + TF). **Sexo não entra na nota.** CEP não entra no score; entra em três regras de predição (`ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+sexo+cep`, `DOB+sexo+cep`) e no EM. Município (`cod_municipio`) nas duas regras de primeiro nome (mês+dia e mês+ano). **`cpf_norm`:** no CPF vem do bronze; no Censo, da `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`, `MIN` se ambíguo; NULL fora da coorte). Entra no prior determinístico e num EM; **não** entra no blocking de predição nem no score — senão a GT sempre seria candidata e o 03 circularia. `NULL = NULL` é falso. Mãe fica para uma 2ª passada. Depois do treino, o `02` grava `splink_model.json` em `OUTPUT_DIR` e uma cópia em [`models/splink_model.json`](models/splink_model.json). JSON antigo com `bayes_factor_column_prefix` (`bf_`) é do contrato anterior — retreinar no `02_treinar`. Depois desta mudança de comparação/blocking, **retreinar**: m/u mudam e o JSON em `models/` continua inválido até esse treino.
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** reusa o bronze, refaz o filtro UF/município **e reconstrói** `censo_registros` / `cpf_registros` (o 00b não lê `*_filtrado`).
 
-**Blocking Splink:** três listas distintas — predição (12 regras OR, recall) no [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb); prior (`nome_completo+DOB` e `cpf_norm`) e EM (quatro blocos apertados para `m`) no [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). Não unificar. Fonte das 12 regras: célula `blocking_rules` do 02b. `cpf_norm` e `nome_meio` **não** entram na predição. Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sexo em `ultimo+mes+dia+sexo+cep` e `DOB+UF+sexo+cep`. CEP em quatro regras (não só DOB+CEP).
+**Blocking Splink:** três listas distintas — predição (11 regras OR, recall) no [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb); prior (`nome_completo+DOB` e `cpf_norm`) e EM (quatro blocos apertados para `m`) no [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). Não unificar. Fonte das 11 regras: célula `blocking_rules` do 02b. `cpf_norm` e `nome_meio` **não** entram na predição. Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sexo em `ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+sexo+cep` e `DOB+sexo+cep`. CEP nessas três; município nas duas de primeiro nome.
 
 - `nome_completo_phon`
 - `primeiro_nome_phon` + `ultimo_nome_phon` + `ano_nascimento`
@@ -87,12 +87,11 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 - `primeiro_nome_phon` + `ultimo_nome_phon` + `mes_nascimento` + `ano_nascimento`
 - `primeiro_nome_phon` + `data_nascimento`
 - `ultimo_nome_phon` + `data_nascimento`
-- `primeiro_nome_phon` + `mes_nascimento` + `dia_nascimento`
-- `primeiro_nome_phon` + `mes_nascimento` + `ano_nascimento`
+- `primeiro_nome_phon` + `mes_nascimento` + `dia_nascimento` + `cod_municipio`
+- `primeiro_nome_phon` + `mes_nascimento` + `ano_nascimento` + `cod_municipio`
 - `ultimo_nome_phon` + `mes_nascimento` + `dia_nascimento` + `sexo` + `cep`
-- `ultimo_nome_phon` + `mes_nascimento` + `ano_nascimento` + `cep`
-- `data_nascimento` + `cep`
-- `data_nascimento` + `uf` + `sexo` + `cep`
+- `ultimo_nome_phon` + `mes_nascimento` + `ano_nascimento` + `sexo` + `cep`
+- `data_nascimento` + `sexo` + `cep`
 
 Profile e gráfico cumulativo de pares candidatos rodam **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
 
@@ -104,7 +103,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 
 - Nome: completo, primeiro/meio/último (partículas `DA`, `DOS`, etc. e placeholders `DESCONHECIDO`, `MAE` removidos por [`clean_name_sql`](features.py); vazio → `NULL`). `primeiro_ultimo` e `primeiro_ultimo_phon` nascem no NB00 (`CONCAT_WS` das pontas); não entram no score.
 - **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py)). Sofre o mesmo split da pessoa: `primeiro_nome_mae`, `nome_meio_mae`, `ultimo_nome_mae`, com as fonéticas correspondentes. Vazio vira `NULL` (`NULLIF`), para o Splink não casar `'' = ''`
-- **`cpf_norm`:** no CPF, `COD_CPF` normalizado (11 díg.). No Censo, join com `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`; `MIN` se ambíguo; NULL fora da coorte). Coluna estrutural. Treino: prior + EM. Não entra no score nem nas 12 regras de predição.
+- **`cpf_norm`:** no CPF, `COD_CPF` normalizado (11 díg.). No Censo, join com `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`; `MIN` se ambíguo; NULL fora da coorte). Coluna estrutural. Treino: prior + EM. Não entra no score nem nas 11 regras de predição.
 - **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
 - Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria

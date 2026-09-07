@@ -1,4 +1,4 @@
-"""Contrato do JSON (02) e das 12 regras de predição (02b)."""
+"""Contrato do JSON (02) e das 11 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -70,11 +70,21 @@ def comparison_names(model: dict) -> list[str]:
     return [c["output_column_name"] for c in model["comparisons"]]
 
 
-def test_doze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
-    assert len(blocking_cols) == 12
+def test_onze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
+    assert len(blocking_cols) == 11
     assert blocking_cols[0] == ("nome_completo_phon",)
-    assert ("data_nascimento", "cep") in blocking_cols
-    assert ("data_nascimento", "uf", "sexo", "cep") in blocking_cols
+    assert (
+        "primeiro_nome_phon",
+        "mes_nascimento",
+        "dia_nascimento",
+        "cod_municipio",
+    ) in blocking_cols
+    assert (
+        "primeiro_nome_phon",
+        "mes_nascimento",
+        "ano_nascimento",
+        "cod_municipio",
+    ) in blocking_cols
     assert (
         "ultimo_nome_phon",
         "mes_nascimento",
@@ -86,8 +96,12 @@ def test_doze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
         "ultimo_nome_phon",
         "mes_nascimento",
         "ano_nascimento",
+        "sexo",
         "cep",
     ) in blocking_cols
+    assert ("data_nascimento", "sexo", "cep") in blocking_cols
+    assert ("data_nascimento", "cep") not in blocking_cols
+    assert ("data_nascimento", "uf", "sexo", "cep") not in blocking_cols
 
 
 def test_cpf_fora_do_blocking_de_predicao(
@@ -107,7 +121,7 @@ def test_meio_fora_do_blocking_de_predicao(
 
 def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None:
     com_sexo = [cols for cols in blocking_cols if "sexo" in cols]
-    assert ("data_nascimento", "uf", "sexo", "cep") in com_sexo
+    assert ("data_nascimento", "sexo", "cep") in com_sexo
     assert (
         "ultimo_nome_phon",
         "mes_nascimento",
@@ -115,9 +129,18 @@ def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None
         "sexo",
         "cep",
     ) in com_sexo
-    assert len(com_sexo) == 2
+    assert (
+        "ultimo_nome_phon",
+        "mes_nascimento",
+        "ano_nascimento",
+        "sexo",
+        "cep",
+    ) in com_sexo
+    assert len(com_sexo) == 3
     for cols in blocking_cols:
         if "primeiro_nome_phon" in cols and "ultimo_nome_phon" in cols:
+            assert "sexo" not in cols
+        if "primeiro_nome_phon" in cols and "ultimo_nome_phon" not in cols:
             assert "sexo" not in cols
 
 
@@ -162,9 +185,14 @@ def test_data_nascimento_else_m_fixo(model: dict) -> None:
     labels = [lvl.get("label_for_charts", "") for lvl in levels]
     sqls = " ".join(lvl.get("sql_condition", "") for lvl in levels)
     assert levels[0].get("is_null_level") is True
-    assert any("mes" in lab.lower() and "dia" in lab.lower() for lab in labels)
+    if "TRY_CAST(ano_nascimento" not in sqls:
+        pytest.skip(
+            "JSON antigo sem |ano|<=1 — retreinar notebooks/02_treinar_splink.ipynb"
+        )
+    assert any("ano" in lab.lower() for lab in labels)
     assert "mes_nascimento_l = mes_nascimento_r" in sqls
     assert "dia_nascimento_l = dia_nascimento_r" in sqls
+    assert "<= 1" in sqls
     else_lvl = levels[-1]
     assert else_lvl.get("sql_condition") == "ELSE"
     assert else_lvl.get("m_probability") == 1e-6

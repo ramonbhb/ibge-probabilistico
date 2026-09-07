@@ -15,7 +15,30 @@ def _montar_05(con: duckdb.DuckDBPyConnection) -> None:
             m.match_probability,
             CASE
                 WHEN ca.nome_mae_phon IS NOT NULL AND pb.nome_mae_phon IS NOT NULL
-                     AND ca.nome_mae_phon = pb.nome_mae_phon
+                     AND (
+                         ca.nome_mae_phon = pb.nome_mae_phon
+                         OR (
+                             least(
+                                 len(string_split(ca.nome_mae_phon, ' ')),
+                                 len(string_split(pb.nome_mae_phon, ' '))
+                             ) >= 2
+                             AND list_slice(
+                                 string_split(ca.nome_mae_phon, ' '),
+                                 1,
+                                 least(
+                                     len(string_split(ca.nome_mae_phon, ' ')),
+                                     len(string_split(pb.nome_mae_phon, ' '))
+                                 )
+                             ) = list_slice(
+                                 string_split(pb.nome_mae_phon, ' '),
+                                 1,
+                                 least(
+                                     len(string_split(ca.nome_mae_phon, ' ')),
+                                     len(string_split(pb.nome_mae_phon, ' '))
+                                 )
+                             )
+                         )
+                     )
                     THEN 'mae_phon'
                 WHEN ca.nome_completo_phon IS NOT NULL
                      AND pb.nome_completo_phon IS NOT NULL
@@ -36,7 +59,30 @@ def _montar_05(con: duckdb.DuckDBPyConnection) -> None:
         JOIN pessoas pb ON pb.unique_id = m.unique_id_cpf
         WHERE (
             ca.nome_mae_phon IS NOT NULL AND pb.nome_mae_phon IS NOT NULL
-            AND ca.nome_mae_phon = pb.nome_mae_phon
+            AND (
+                ca.nome_mae_phon = pb.nome_mae_phon
+                OR (
+                    least(
+                        len(string_split(ca.nome_mae_phon, ' ')),
+                        len(string_split(pb.nome_mae_phon, ' '))
+                    ) >= 2
+                    AND list_slice(
+                        string_split(ca.nome_mae_phon, ' '),
+                        1,
+                        least(
+                            len(string_split(ca.nome_mae_phon, ' ')),
+                            len(string_split(pb.nome_mae_phon, ' '))
+                        )
+                    ) = list_slice(
+                        string_split(pb.nome_mae_phon, ' '),
+                        1,
+                        least(
+                            len(string_split(ca.nome_mae_phon, ' ')),
+                            len(string_split(pb.nome_mae_phon, ' '))
+                        )
+                    )
+                )
+            )
         )
         OR (
             ca.nome_completo_phon IS NOT NULL AND pb.nome_completo_phon IS NOT NULL
@@ -99,6 +145,53 @@ def test_faixa_mae_phon_entra() -> None:
     con.close()
 
 
+def test_faixa_mae_prefixo_entra() -> None:
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE melhor_faixa AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.97)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE pessoas AS SELECT * FROM (VALUES
+            ('censo_A', 'MARIA JOANA CORREA', 'JOAO', 'SILVA', 'AAAA', NULL),
+            ('cpf_X', 'MARIA JOANA CORREA SILVA', 'PEDRO', 'SOUZA', 'BBBB', NULL)
+        ) v(unique_id, nome_mae_phon, primeiro_nome_phon, ultimo_nome_phon,
+            nome_completo_phon, cep)
+        """
+    )
+    _montar_05(con)
+    regra = con.execute("SELECT regra FROM extra_unicas").fetchone()[0]
+    assert regra == "mae_phon"
+    con.close()
+
+
+def test_faixa_mae_um_token_nao_prefixa() -> None:
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE melhor_faixa AS SELECT * FROM (VALUES
+            ('censo_A', 'cpf_X', 0.97)
+        ) v(unique_id_censo, unique_id_cpf, match_probability)
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE pessoas AS SELECT * FROM (VALUES
+            ('censo_A', 'MARIA', 'JOAO', 'SILVA', 'AAAA', NULL),
+            ('cpf_X', 'MARIA SILVA', 'PEDRO', 'SOUZA', 'BBBB', NULL)
+        ) v(unique_id, nome_mae_phon, primeiro_nome_phon, ultimo_nome_phon,
+            nome_completo_phon, cep)
+        """
+    )
+    _montar_05(con)
+    assert _ids(con, "extra_unicas") == set()
+    con.close()
+
+
 def test_faixa_pontas_cep_entra() -> None:
     con = duckdb.connect()
     con.execute(
@@ -111,8 +204,8 @@ def test_faixa_pontas_cep_entra() -> None:
     con.execute(
         """
         CREATE TABLE pessoas AS SELECT * FROM (VALUES
-            ('censo_A', NULL, 'JOAO', 'SILVA', 'JOAO MEIO SILVA', '80000000'),
-            ('cpf_X', NULL, 'JOAO', 'SILVA', 'JOAO SILVA', '80000000')
+            ('censo_A', CAST(NULL AS VARCHAR), 'JOAO', 'SILVA', 'JOAO MEIO SILVA', '80000000'),
+            ('cpf_X', CAST(NULL AS VARCHAR), 'JOAO', 'SILVA', 'JOAO SILVA', '80000000')
         ) v(unique_id, nome_mae_phon, primeiro_nome_phon, ultimo_nome_phon,
             nome_completo_phon, cep)
         """
@@ -160,8 +253,8 @@ def test_prioridade_nome_cep_vence_pontas() -> None:
     con.execute(
         """
         CREATE TABLE pessoas AS SELECT * FROM (VALUES
-            ('censo_A', NULL, 'JOAO', 'SILVA', 'JOAO SILVA', '80000000'),
-            ('cpf_X', NULL, 'JOAO', 'SILVA', 'JOAO SILVA', '80000000')
+            ('censo_A', CAST(NULL AS VARCHAR), 'JOAO', 'SILVA', 'JOAO SILVA', '80000000'),
+            ('cpf_X', CAST(NULL AS VARCHAR), 'JOAO', 'SILVA', 'JOAO SILVA', '80000000')
         ) v(unique_id, nome_mae_phon, primeiro_nome_phon, ultimo_nome_phon,
             nome_completo_phon, cep)
         """
