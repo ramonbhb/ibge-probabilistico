@@ -127,9 +127,10 @@ def clean_name(text) -> str | None:
 
 
 # Ordem: dígrafos longos antes de H solto; GUI/GUE e QUI/QUE antes do soft G/C.
+# CH só /ʃ/ antes de vogal (logo após SH); CHR/CHL não entram — H some e C→K.
 _PHONETIC_REPLACEMENTS = [
     ("PH", "F"), ("Y", "I"), ("W", "V"), ("CK", "K"), ("SCH", "X"),
-    ("SH", "X"), ("CH", "X"), ("TH", "T"), ("RH", "R"),
+    ("SH", "X"), ("TH", "T"), ("RH", "R"),
     ("LH", "L"), ("NH", "N"), ("GUI", "GI"),
     ("GUE", "GE"), ("QUI", "KI"), ("QUE", "KE"), ("SS", "S"),
     ("XC", "S"), ("XS", "S"), ("TS", "S"), ("TZ", "S"), ("Z", "S"), ("H", ""),
@@ -147,6 +148,8 @@ def br_phonetic_basic_token(token: str) -> str:
         return ""
     for a, b in _PHONETIC_REPLACEMENTS:
         token = token.replace(a, b)
+        if a == "SH":
+            token = re.sub(r"CH(?=[AEIOU])", "X", token)
     token = re.sub(r"C(?=[EI])", "S", token)
     token = re.sub(r"G(?=[EI])", "J", token)
     token = token.replace("Q", "K").replace("C", "K")
@@ -235,9 +238,10 @@ def normalize_cep(cep) -> str:
 # Featurização em SQL — espelha as funções Python acima
 # =============================================================================
 #
-# O RE2 do DuckDB não tem lookahead nem backreference no padrão, então dois
-# trechos precisam de tradução indireta:
+# O RE2 do DuckDB não tem lookahead nem backreference no padrão, então trechos
+# precisam de tradução indireta:
 #   - C(?=[EI]) vira 'C([EI])' -> 'S\1' (o \1 vale na substituição, não no padrão)
+#   - CH(?=[AEIOU]) vira 'CH([AEIOU])' -> 'X\1'
 #   - _dedupe_consecutive vira list_reduce sobre a lista de caracteres
 
 
@@ -294,6 +298,8 @@ def _phonetic_map_sql(expr: str) -> str:
     out = expr
     for a, b in _PHONETIC_REPLACEMENTS:
         out = f"replace({out}, '{a}', '{b}')"
+        if a == "SH":
+            out = f"regexp_replace({out}, 'CH([AEIOU])', 'X\\1', 'g')"
     out = f"regexp_replace({out}, 'C([EI])', 'S\\1', 'g')"
     out = f"regexp_replace({out}, 'G([EI])', 'J\\1', 'g')"
     return f"replace(replace({out}, 'Q', 'K'), 'C', 'K')"

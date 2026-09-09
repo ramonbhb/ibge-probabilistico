@@ -15,6 +15,7 @@ from config import MODELS_DIR, SPLINK_MODEL_JSON  # noqa: E402
 
 _BLOCK_ON = re.compile(r"block_on\((.*?)\)", re.S)
 _QUOTED = re.compile(r"['\"](\w+)['\"]")
+_NOTEBOOK_02 = Path(__file__).resolve().parent.parent / "notebooks" / "02_treinar_splink.ipynb"
 _NOTEBOOK_02B = Path(__file__).resolve().parent.parent / "notebooks" / "02b_aplicar_splink.ipynb"
 
 
@@ -197,3 +198,43 @@ def test_data_nascimento_else_m_fixo(model: dict) -> None:
     assert else_lvl.get("sql_condition") == "ELSE"
     assert else_lvl.get("m_probability") == 1e-6
     assert else_lvl.get("fix_m_probability") is True
+
+
+def _comparisons_src_02() -> str:
+    nb = json.loads(_NOTEBOOK_02.read_text(encoding="utf-8"))
+    for cell in nb["cells"]:
+        text = "".join(cell.get("source", []))
+        if "comparisons = [" in text and "nome_completo_phon" in text:
+            return text
+    raise AssertionError("02 sem célula comparisons")
+
+
+def test_02_nome_completo_token_aware() -> None:
+    src = _comparisons_src_02()
+    assert "prefixo_sql" in src
+    assert "list_slice" in src
+    assert "[-1]" in src
+    assert "jw_ultimo_095_sql" in src
+    assert "NameComparison(\n        'nome_completo_phon'" not in src
+    assert "NameComparison(\n        'primeiro_nome_phon'" in src
+    assert "NameComparison(\n        'ultimo_nome_phon'" in src
+    jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
+    assert jw95.find("[-1]") < jw95.find("jaro_winkler_similarity")
+
+
+def test_nome_completo_json_token_aware(model: dict) -> None:
+    completo = next(
+        c for c in model["comparisons"] if c["output_column_name"] == "nome_completo_phon"
+    )
+    sqls = " ".join(lvl.get("sql_condition", "") for lvl in completo["comparison_levels"])
+    if "list_slice" not in sqls:
+        pytest.skip(
+            "JSON antigo sem prefixo de tokens — retreinar notebooks/02_treinar_splink.ipynb"
+        )
+    labels = [lvl.get("label_for_charts", "") for lvl in completo["comparison_levels"]]
+    assert any("prefixo" in lab.lower() for lab in labels)
+    for lvl in completo["comparison_levels"]:
+        sql = lvl.get("sql_condition", "")
+        if "jaro_winkler_similarity" in sql:
+            assert "[-1]" in sql
+            assert sql.find("string_split") < sql.find("jaro_winkler_similarity")

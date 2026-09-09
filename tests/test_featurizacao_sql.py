@@ -30,6 +30,8 @@ NOMES = [
     "Guilherme Guimarães",
     "Joaquim Queiroz Quintela",
     "Nascimento Cheira Chácara",
+    "Christian Crystian",
+    "Chloe Chaves Chico",
     "Cecília Cícero Célia",
     "Gilberto Gil Gêmeo",
     "Aaaa Bbbb Cccc",
@@ -156,6 +158,20 @@ def test_cedilha_e_th_na_fonetica() -> None:
     assert full_name_phon_basic(clean_name("ASSUNÇÃO") or "") == "ASUNSAO"
     assert full_name_phon_basic(clean_name("THEODORO") or "") == "TEODORO"
     assert full_name_phon_basic(clean_name("RHUAN") or "") == "RUAN"
+
+
+def test_ch_so_x_antes_de_vogal() -> None:
+    """CHRISTIAN/CRYSTIAN → KRISTIAN; CH+vogal continua X (CHAVES, CHICO)."""
+    juntos = ["CHRISTIAN", "CRYSTIAN", "CRISTIAN", "KRISTIAN"]
+    assert {full_name_phon_basic(clean_name(n) or "") for n in juntos} == {
+        "KRISTIAN"
+    }
+    assert full_name_phon_basic(clean_name("CHAVES") or "") == "XAVES"
+    assert full_name_phon_basic(clean_name("CHICO") or "") == "XIKO"
+    assert full_name_phon_basic(clean_name("CHLOE") or "") == "KLOE"
+    assert full_name_phon_basic(clean_name("SCHMIDT") or "") == "XMIDT"
+    assert full_name_phon_basic(clean_name("SHIRLEY") or "") == "XIRLEI"
+    assert full_name_phon_basic(clean_name("THEODORO") or "") == "TEODORO"
 
 
 def test_nome_meio_phon_composto() -> None:
