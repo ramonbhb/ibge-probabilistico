@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import sys
 import unicodedata
@@ -137,6 +138,38 @@ _PHONETIC_REPLACEMENTS = [
 ]
 
 
+# Grafia/composto: só no caminho fonético. nome_completo permanece o limpo original.
+# Lookup por token — nunca substring (KEMILI não mexe em KEMILIANE).
+# Canônico pode ter espaço (ROSAMARIA → ROSA MARIA).
+_NOMES_VARIANTES_CSV = Path(__file__).resolve().parent / "data" / "nomes_variantes.csv"
+
+
+def _pares_variantes(caminho: Path = _NOMES_VARIANTES_CSV) -> list[tuple[str, str]]:
+    pares: list[tuple[str, str]] = []
+    with caminho.open(encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            variante = (row.get("variante") or "").strip().upper()
+            canonico = (row.get("canonico") or "").strip().upper()
+            if variante and canonico and variante != canonico:
+                pares.append((variante, canonico))
+    pares.sort(key=lambda p: (-len(p[0]), p[0]))
+    return pares
+
+
+_VARIANTES: list[tuple[str, str]] = _pares_variantes()
+_VARIANTES_MAP: dict[str, str] = {v: c for v, c in _VARIANTES}
+
+
+def aplicar_variantes_tokens(text: str) -> str:
+    """Substitui tokens isolados pela forma canônica; o restante não muda."""
+    if not text:
+        return ""
+    saida: list[str] = []
+    for tok in text.split():
+        saida.extend(_VARIANTES_MAP.get(tok, tok).split())
+    return " ".join(saida)
+
+
 def _dedupe_consecutive(token: str) -> str:
     return re.sub(r"(.)\1+", r"\1", token)
 
@@ -161,7 +194,10 @@ def full_name_norm(name) -> str:
 
 
 def full_name_phon_basic(name) -> str:
-    vals = [br_phonetic_basic_token(t) for t in tokenize_name(name)]
+    """Grafia canônica por token, depois fonética. O nome limpo não entra aqui."""
+    base = " ".join(tokenize_name(name))
+    canon = aplicar_variantes_tokens(base)
+    vals = [br_phonetic_basic_token(t) for t in canon.split()] if canon else []
     return " ".join(v for v in vals if v)
 
 
@@ -268,6 +304,33 @@ def strip_noise_sql(expr: str) -> str:
     return f"trim(regexp_replace({out}, '\\s+', ' ', 'g'))"
 
 
+def _sql_str(text: str) -> str:
+    return "'" + text.replace("'", "''") + "'"
+
+
+_MAPA_VARIANTES_SQL = "MAP {" + ", ".join(
+    f"{_sql_str(v)}: {_sql_str(c)}" for v, c in _VARIANTES
+) + "}"
+
+
+def aplicar_variantes_sql(expr: str) -> str:
+    """aplicar_variantes_tokens() em SQL: lookup por token, nunca substring.
+
+    MAP + split do canônico cobre composto (`ROSAMARIA` → `ROSA` `MARIA`).
+    Equivale ao replace `' KEMILI '` → `' KEMELI '` das partículas.
+    """
+    safe = f"coalesce({expr}, '')"
+    toks = (
+        f"flatten(list_transform(string_split({safe}, ' '), "
+        f"_vtok -> string_split("
+        f"coalesce({_MAPA_VARIANTES_SQL}[_vtok], _vtok), ' ')))"
+    )
+    return (
+        f"CASE WHEN {safe} = '' THEN '' "
+        f"ELSE array_to_string({toks}, ' ') END"
+    )
+
+
 def clean_name_sql(col: str) -> str:
     """normalize_text_sql + strip_noise_sql; string vazia vira NULL."""
     norm = normalize_text_sql(col)
@@ -311,9 +374,10 @@ def phonetic_token_sql(expr: str) -> str:
 
 
 def phonetic_name_sql(norm_col: str) -> str:
-    """full_name_phon_basic() em SQL: fonética por token, descartando os vazios."""
+    """full_name_phon_basic() em SQL: variantes, depois fonética por token."""
+    canon = aplicar_variantes_sql(norm_col)
     token_expr = phonetic_token_sql("_tok")
-    tokens = f"list_transform(string_split({norm_col}, ' '), _tok -> {token_expr})"
+    tokens = f"list_transform(string_split({canon}, ' '), _tok -> {token_expr})"
     return f"array_to_string(list_filter({tokens}, _v -> _v <> ''), ' ')"
 
 
@@ -368,7 +432,8 @@ def name_feature_columns_sql(
     """Colunas de nome (split + fonética) a partir de coluna já limpa.
 
     Espera `clean_name_sql` aplicado antes (partículas removidas, vazio = NULL).
-    Fonética é calculada uma vez no nome completo e repartida por split.
+    O nome limpo não muda. Variantes de grafia entram só na fonética, que é
+    calculada uma vez no nome completo e repartida por split.
     """
     safe = f"coalesce({norm_col}, '')"
     partes = _split_parts_sql(safe)

@@ -58,6 +58,9 @@ NOMES = [
     "A B",
     "A B C",
     "A B C D",
+    "Kemili Silva",
+    "Rosamaria Santos",
+    "KEMILIANE SOUZA",
 ]
 
 CHAVES = [
@@ -158,6 +161,24 @@ def test_cedilha_e_th_na_fonetica() -> None:
     assert full_name_phon_basic(clean_name("ASSUNÇÃO") or "") == "ASUNSAO"
     assert full_name_phon_basic(clean_name("THEODORO") or "") == "TEODORO"
     assert full_name_phon_basic(clean_name("RHUAN") or "") == "RUAN"
+
+
+def test_variantes_so_no_fonetico() -> None:
+    """nome_completo fica o original; grafia/composto só no *_phon."""
+    assert clean_name("KEMILI SILVA") == "KEMILI SILVA"
+    assert clean_name("ROSAMARIA SANTOS") == "ROSAMARIA SANTOS"
+    assert full_name_phon_basic("KEMILI SILVA") == full_name_phon_basic("KEMELI SILVA")
+    assert full_name_phon_basic("ROSAMARIA SANTOS") == full_name_phon_basic(
+        "ROSA MARIA SANTOS"
+    )
+    # substring: KEMILI isolado não pode alterar KEMILIANE
+    assert full_name_phon_basic("KEMILIANE") != full_name_phon_basic("KEMELI")
+    ref = referencia_python("Rosamaria Santos")
+    assert ref["nome_completo"] == "ROSAMARIA SANTOS"
+    assert ref["primeiro_nome"] == "ROSAMARIA"
+    assert ref["nome_completo_phon"] == full_name_phon_basic("ROSA MARIA SANTOS")
+    assert ref["primeiro_nome_phon"] == full_name_phon_basic("ROSA")
+    assert ref["nome_meio_phon"] == full_name_phon_basic("MARIA")
 
 
 def test_ch_so_x_antes_de_vogal() -> None:

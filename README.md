@@ -108,7 +108,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 - Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
 - **`idade`:** Censo via `PECP0401` só quando a data validada é nula (se há DOB, o NB00b zera a idade para o Splink não duplicar a comparison); CPF = anos completos em `DATA_REFERENCIA_IDADE` ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo
-- Fonética: `*_phon` (substituições PT-BR; `Ç`→`S` / `Ñ`→`NH` antes do ASCII; `TH`/`RH`; `CH` só /ʃ/ antes de vogal — `CHRISTIAN`/`CRYSTIAN` → `KRISTIAN`, `CHAVES` → `XAVES`). Comparação experimental em [`fonetica_luis.py`](fonetica_luis.py) / [`notebooks/compare_fonetica.ipynb`](notebooks/compare_fonetica.ipynb).
+- Fonética: `*_phon` (substituições PT-BR; `Ç`→`S` / `Ñ`→`NH` antes do ASCII; `TH`/`RH`; `CH` só /ʃ/ antes de vogal — `CHRISTIAN`/`CRYSTIAN` → `KRISTIAN`, `CHAVES` → `XAVES`). Antes do mapa, tokens de [`data/nomes_variantes.csv`](data/nomes_variantes.csv) viram a forma canônica (`KEMILI`→`KEMELI`, `ROSAMARIA`→`ROSA MARIA`); `nome_completo` não muda. Comparação experimental em [`fonetica_luis.py`](fonetica_luis.py) / [`notebooks/compare_fonetica.ipynb`](notebooks/compare_fonetica.ipynb).
 
 ### Idade
 
@@ -121,7 +121,7 @@ Se a idade vier muito nula, a célula **3b do NB00** aponta a causa: nulos de `P
 
 ### Featurização de nomes: SQL, não Python
 
-Normalização (`normalize_text_sql`), limpeza de partículas/placeholders (`clean_name_sql`), split e fonética são expressões SQL do DuckDB geradas por [`features.py`](features.py). A fonética é calculada **uma vez** no nome completo e repartida nas três partes (`nome_meio_phon` incluído). O NB00 monta `*_registros` direto do staging, sem tabela intermediária: pessoa e mãe saem do mesmo passe, apenas com aliases diferentes (`PESSOA_COLUMNS`, `NOME_MAE_COLUMNS`).
+Normalização (`normalize_text_sql`), limpeza de partículas/placeholders (`clean_name_sql`), split e fonética são expressões SQL do DuckDB geradas por [`features.py`](features.py). A fonética é calculada **uma vez** no nome completo (primeiro as grafias do CSV, depois o mapa) e repartida nas três partes (`nome_meio_phon` incluído). O NB00 monta `*_registros` direto do staging, sem tabela intermediária: pessoa e mãe saem do mesmo passe, apenas com aliases diferentes (`PESSOA_COLUMNS`, `NOME_MAE_COLUMNS`).
 
 A versão anterior trazia a tabela inteira para a memória via `fetch_arrow_table()` antes de distribuir em `ProcessPoolExecutor`. Em SQL o processamento é vetorizado e em streaming, sem teto de RAM.
 
