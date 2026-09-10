@@ -46,10 +46,18 @@ Cada Censo de G cai em **um** corte:
 
 F1 é opcional para slide. O par precisão + recall já é o padrão de validação de linkage 1:1.
 
+## Gráficos Splink (`clerical_match_score`)
+
+Diagnóstico de **ranking pairwise**, depois do pacote acima. Não substituem os 8 números.
+
+Tabela `labels_clericais`: par ouro = 1; outro CPF do mesmo Censo em `splink_predictions` = 0. Sem negativo a ROC/precisão do Splink degeneram. O Splink re-pontua só esses pares (`accuracy_analysis_from_labels_table`, `prediction_errors_from_labels_table` no corte `T`).
+
+Precisão/ROC/F1 daí comparam rótulo clerical × `match_probability` do par. Não são `P(A = Y | A definido)`. FP/FN do `prediction_errors` também são do par, não da associação 1:1.
+
 ## O que não é métrica de vínculo associado
 
 - Acurácia com verdadeiro negativo (o TN é o estado inteiro).
-- ROC em todos os candidatos do bloco (mede ranking, não o CPF associado).
+- ROC/precisão Splink nos pares rotulados (mede ranking, não o CPF associado). Os gráficos do 03b são esse diagnóstico.
 - `n_associou_cpf_errado / n_ouro` como “taxa de FP” (mistura quem nem associou; isso já é FN).
 - Média de `p` do Splink (`p` não é P(match) neste notebook).
 - Contar todo par `p ≥ T` que não é ouro: o Splink gera vários candidatos; a atribuição escolhe um.
