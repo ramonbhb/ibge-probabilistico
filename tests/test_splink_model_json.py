@@ -7,6 +7,7 @@ import re
 import sys
 from pathlib import Path
 
+import duckdb
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -183,17 +184,15 @@ def test_data_nascimento_else_m_fixo(model: dict) -> None:
         c for c in model["comparisons"] if c["output_column_name"] == "data_nascimento"
     )
     levels = dob["comparison_levels"]
-    labels = [lvl.get("label_for_charts", "") for lvl in levels]
     sqls = " ".join(lvl.get("sql_condition", "") for lvl in levels)
     assert levels[0].get("is_null_level") is True
-    if "TRY_CAST(ano_nascimento" not in sqls:
+    if "mes_nascimento_l = mes_nascimento_r" in sqls:
         pytest.skip(
-            "JSON antigo sem |ano|<=1 — retreinar notebooks/02_treinar_splink.ipynb"
+            "JSON antigo com mês/dia — retreinar notebooks/02_treinar_splink.ipynb"
         )
-    assert any("ano" in lab.lower() for lab in labels)
-    assert "mes_nascimento_l = mes_nascimento_r" in sqls
-    assert "dia_nascimento_l = dia_nascimento_r" in sqls
+    assert "damerau_levenshtein" in sqls.lower()
     assert "<= 1" in sqls
+    assert "<= 2" in sqls
     else_lvl = levels[-1]
     assert else_lvl.get("sql_condition") == "ELSE"
     assert else_lvl.get("m_probability") == 1e-6
@@ -207,6 +206,38 @@ def _comparisons_src_02() -> str:
         if "comparisons = [" in text and "nome_completo_phon" in text:
             return text
     raise AssertionError("02 sem célula comparisons")
+
+
+def test_02_data_damerau_aninhado() -> None:
+    src = _comparisons_src_02()
+    assert "mes_dia_ano_sql" not in src
+    i1 = src.find("DamerauLevenshteinLevel('data_nascimento', 1)")
+    i2 = src.find("DamerauLevenshteinLevel('data_nascimento', 2)")
+    assert i1 != -1 and i2 != -1
+    assert i1 < i2
+
+
+def test_damerau_iso_08_vs_10() -> None:
+    con = duckdb.connect()
+    rows = con.execute(
+        """
+        SELECT a, b, damerau_levenshtein(a, b) AS d
+        FROM (VALUES
+            ('1980-10-08', '1980-10-08'),
+            ('1980-10-08', '1980-10-09'),
+            ('1980-10-08', '1980-10-10'),
+            ('1980-10-08', '1980-10-18'),
+            ('1999-10-08', '2000-10-08')
+        ) v(a, b)
+        """
+    ).fetchall()
+    con.close()
+    dist = {(a, b): d for a, b, d in rows}
+    assert dist[("1980-10-08", "1980-10-08")] == 0
+    assert dist[("1980-10-08", "1980-10-09")] == 1
+    assert dist[("1980-10-08", "1980-10-10")] == 2
+    assert dist[("1980-10-08", "1980-10-18")] == 1
+    assert dist[("1999-10-08", "2000-10-08")] > 2
 
 
 def test_02_nome_completo_token_aware() -> None:

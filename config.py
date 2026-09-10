@@ -197,8 +197,9 @@ def set_filtros(
 # =============================================================================
 #
 # OUTPUT_DIR_BASE, OUTPUT_DIR (subdir do recorte), CENSO_DIR, CENSO_RAW_DIR,
-# CENSO_PESSOAS_ARQUIVO, CPF_ARQUIVO, COHORT_DIR, COHORT_DEDUP_ARQUIVO,
-# LISTA_OURO_ARQUIVO, DUCKDB_TEMP_DIR, DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
+# CENSO_ESPECIE_ARQUIVO, CENSO_LOGR_ARQUIVO, CENSO_PESSOAS_ARQUIVO, CPF_ARQUIVO,
+# COHORT_DIR, COHORT_DEDUP_ARQUIVO, LISTA_OURO_ARQUIVO, DUCKDB_TEMP_DIR,
+# DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
 
 PROB_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR_BASE = Path(
@@ -225,10 +226,17 @@ CENSO_RAW_DIR = Path(
     os.environ.get("CENSO_RAW_DIR", Path.home() / "singed/bases/raw/censo")
 ).expanduser()
 
-CENSO_CEP_ARQUIVO = Path(
+CENSO_ESPECIE_ARQUIVO = Path(
     os.environ.get(
-        "CENSO_CEP_ARQUIVO",
-        CENSO_RAW_DIR / "data_cep_uniq.csv",
+        "CENSO_ESPECIE_ARQUIVO",
+        CENSO_RAW_DIR / "ESPECIE.csv",
+    )
+).expanduser()
+
+CENSO_LOGR_ARQUIVO = Path(
+    os.environ.get(
+        "CENSO_LOGR_ARQUIVO",
+        CENSO_RAW_DIR / "LOGR.csv",
     )
 ).expanduser()
 
@@ -307,6 +315,9 @@ CPF_COL_NOME_MAE = "NOM_MAE"
 CPF_COL_SEXO = "COD_SEXO"
 CPF_COL_UF = "COD_UFMUN"
 CPF_COL_CEP = "COD_CEP"
+CPF_COL_TIPO_LOGRADOURO = "DSC_TIPO_LOGRADOURO"
+CPF_COL_LOGRADOURO = "NOM_LOGRADOURO"
+CPF_COL_NUM_LOGRADOURO = "NUM_LOGRADOURO"
 # Opcional no bronze: o NB00 detecta a presença e cai para NULL se não existir.
 CPF_COL_ANO_OBITO = "ANO_OBITO"
 
@@ -327,21 +338,26 @@ CENSO_COL_IDADE_MESES = "PECP0030"
 # Alias legado usado no diagnóstico do NB00
 CENSO_COL_IDADE_ANOS = CENSO_COL_IDADE_CALC
 CENSO_COL_UF = "B0001"
-# Chaves de join pessoas ↔ data_cep_uniq.csv
+# Chaves de join pessoas ↔ ESPECIE.csv (face) ↔ LOGR.csv (rua)
 CENSO_COL_SETOR = "B0000"
 CENSO_COL_QUADRA = "NUM_QUADRA"
 CENSO_COL_FACE = "NUM_FACE"
 
-# Colunas em data_cep_uniq.csv
-CEP_COL_UF = "COD_UF"
-CEP_COL_MUNICIPIO = "COD_MUNICIPIO"
-CEP_COL_DISTRITO = "COD_DISTRITO"
-CEP_COL_SUBDISTRITO = "COD_SUBDISTRITO"
-CEP_COL_SETOR = "COD_SETOR"
-CEP_COL_QUADRA = "NUM_QUADRA"
-CEP_COL_FACE = "NUM_FACE"
-CEP_COL_CEP = "CEP"
-CEP_COL_LOG = "NO_LOG"
+# ESPECIE.csv: face do setor → segmento de logradouro (CSV |, quote ")
+ESPECIE_COL_SETOR = "cod_setor"
+ESPECIE_COL_QUADRA = "num_quadra"
+ESPECIE_COL_FACE = "num_face"
+ESPECIE_COL_SEGLOGR = "cod_seglogr"
+
+# LOGR.csv: segmento → CEP, tipo, título e nome da rua
+LOGR_COL_SETOR = "COD_SETOR"
+LOGR_COL_SEGLOGR = "COD_SEGLOGR"
+LOGR_COL_UF = "COD_UF"
+LOGR_COL_MUNICIPIO = "COD_MUNICIPIO"
+LOGR_COL_CEP = "CEP_SEGLOGR"
+LOGR_COL_TIPO = "NOM_TIPO_SEGLOGR"
+LOGR_COL_TITULO = "NOM_TITULO_SEGLOGR"
+LOGR_COL_NOME = "NOM_SEGLOGR"
 
 DUCKDB_THREADS = int(os.environ.get("DUCKDB_THREADS", "20"))
 DUCKDB_MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "370GB")
@@ -356,9 +372,28 @@ def cpf_norm_sql(col: str) -> str:
 
 def setor_norm_sql(col: str) -> str:
     """Normaliza código de setor censitário (15 díg.) para join."""
+    return digits_lpad_sql(col, 15)
+
+
+def digits_lpad_sql(col: str, width: int) -> str:
+    """Só dígitos, com zeros à esquerda. Vazio vira NULL (não casa com '000')."""
+    digits = f"regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g')"
     return (
-        f"lpad(regexp_replace(CAST({col} AS VARCHAR), '[^0-9]', '', 'g'), 15, '0')"
+        f"CASE WHEN {digits} = '' THEN NULL ELSE lpad({digits}, {width}, '0') END"
     )
+
+
+def censo_pipe_csv_sql(path: Path) -> str:
+    """CSV do Censo raw: pipe, aspas, cabeçalho."""
+    p = str(Path(path).expanduser()).replace("'", "''")
+    return f"read_csv('{p}', delim='|', quote='\"', header=true)"
+
+
+def logradouro_censo_sql(titulo_col: str, nome_col: str) -> str:
+    """Título + nome da rua. Sem clean_name (DA/DE ficam). Vazio vira ''."""
+    titulo = f"NULLIF(TRIM(CAST({titulo_col} AS VARCHAR)), '')"
+    nome = f"NULLIF(TRIM(CAST({nome_col} AS VARCHAR)), '')"
+    return f"COALESCE(CONCAT_WS(' ', {titulo}, {nome}), '')"
 
 
 def cpf_uf_sql(col: str) -> str:
@@ -399,26 +434,32 @@ def censo_municipio_expr(alias: str = "p") -> str:
 
 
 def censo_cep_join_on(p_alias: str = "p", cep_alias: str = "k") -> str:
-    """Condição ON para join censo_pessoas ↔ lookup de CEP."""
+    """ON pessoas ↔ censo_logr_lookup (setor 15 díg. + quadra/face 3 díg.)."""
     return f"""{setor_norm_sql(f'{p_alias}.{CENSO_COL_SETOR}')} = {cep_alias}.cod_setor_norm
-        AND CAST({p_alias}.{CENSO_COL_QUADRA} AS VARCHAR) = {cep_alias}.num_quadra
-        AND CAST({p_alias}.{CENSO_COL_FACE} AS VARCHAR) = {cep_alias}.num_face"""
+        AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_QUADRA}', 3)} = {cep_alias}.num_quadra
+        AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_FACE}', 3)} = {cep_alias}.num_face"""
 
 
-def materialize_censo_cep_lookup(
+def materialize_censo_logr_lookup(
     con: duckdb.DuckDBPyConnection,
     *,
-    source_path: Path | None = None,
-    target_table: str = "censo_cep_lookup",
+    especie_path: Path | None = None,
+    logr_path: Path | None = None,
+    target_table: str = "censo_logr_lookup",
     filtro_uf: FiltroGeo | Any = _UNSET,
     filtro_municipio: FiltroGeo | Any = _UNSET,
 ) -> None:
-    """Materializa lookup de CEP a partir de data_cep_uniq.csv (filtro UF e/ou município)."""
-    path = (source_path or CENSO_CEP_ARQUIVO).expanduser()
+    """Face (ESPECIE) ⋈ rua (LOGR) → uma linha por setor+quadra+face.
+
+    Filtro UF/município entra no LOGR (`COD_UF` / `COD_MUNICIPIO`). Se a face
+    aparecer mais de uma vez, imprime n vs n_chaves e avisa.
+    """
+    especie = (especie_path or CENSO_ESPECIE_ARQUIVO).expanduser()
+    logr = (logr_path or CENSO_LOGR_ARQUIVO).expanduser()
     clauses: list[str] = []
     ufs = normalize_uf_lista(FILTRO_UF if filtro_uf is _UNSET else filtro_uf)
     if ufs:
-        uf_col = f'c."{CEP_COL_UF}"'
+        uf_col = f'l."{LOGR_COL_UF}"'
         uf_expr = (
             f"lpad(regexp_replace(CAST({uf_col} AS VARCHAR), '[^0-9]', '', 'g'), 2, '0')"
         )
@@ -427,22 +468,74 @@ def materialize_censo_cep_lookup(
         FILTRO_MUNICIPIO if filtro_municipio is _UNSET else filtro_municipio
     )
     if muns:
-        mun_col = f'c."{CEP_COL_MUNICIPIO}"'
+        mun_col = f'l."{LOGR_COL_MUNICIPIO}"'
         mun_expr = (
             f"lpad(regexp_replace(CAST({mun_col} AS VARCHAR), '[^0-9]', '', 'g'), 7, '0')"
         )
         clauses.append(_sql_eq_or_in(mun_expr, muns))
     where_clause = " AND ".join(clauses) if clauses else "TRUE"
 
+    especie_sql = censo_pipe_csv_sql(especie)
+    logr_sql = censo_pipe_csv_sql(logr)
+    tipo_sql = f"COALESCE(TRIM(CAST(l.\"{LOGR_COL_TIPO}\" AS VARCHAR)), '')"
+    logr_nome_sql = logradouro_censo_sql(
+        f'l."{LOGR_COL_TITULO}"',
+        f'l."{LOGR_COL_NOME}"',
+    )
+    join_sql = f"""
+    WITH especie AS (
+        SELECT
+            {setor_norm_sql(f'e."{ESPECIE_COL_SETOR}"')} AS cod_setor_norm,
+            {digits_lpad_sql(f'e."{ESPECIE_COL_QUADRA}"', 3)} AS num_quadra,
+            {digits_lpad_sql(f'e."{ESPECIE_COL_FACE}"', 3)} AS num_face,
+            {digits_lpad_sql(f'e."{ESPECIE_COL_SEGLOGR}"', 7)} AS cod_seglogr
+        FROM {especie_sql} e
+    ),
+    logr AS (
+        SELECT
+            {setor_norm_sql(f'l."{LOGR_COL_SETOR}"')} AS cod_setor_norm,
+            {digits_lpad_sql(f'l."{LOGR_COL_SEGLOGR}"', 7)} AS cod_seglogr,
+            {cep_norm_sql(f'l."{LOGR_COL_CEP}"')} AS cep,
+            {tipo_sql} AS tipo_logradouro,
+            {logr_nome_sql} AS logradouro
+        FROM {logr_sql} l
+        WHERE {where_clause}
+    )
+    SELECT
+        e.cod_setor_norm,
+        e.num_quadra,
+        e.num_face,
+        l.cep,
+        l.tipo_logradouro,
+        l.logradouro
+    FROM especie e
+    INNER JOIN logr l
+        ON e.cod_setor_norm = l.cod_setor_norm
+       AND e.cod_seglogr = l.cod_seglogr
+    """
+    n, n_keys = con.execute(f"""
+    SELECT
+        COUNT(*) AS n,
+        COUNT(DISTINCT (cod_setor_norm, num_quadra, num_face)) AS n_chaves
+    FROM ({join_sql})
+    """).fetchone()
+    print(f"censo_logr_lookup: {n:,} linhas ESPECIE⋈LOGR, {n_keys:,} faces distintas")
+    if n != n_keys:
+        print(
+            "AVISO: face com mais de um segmento/rua; o lookup fica com "
+            "MIN(cep / tipo / logradouro) por setor+quadra+face."
+        )
+
     con.execute(f"""
     CREATE OR REPLACE TABLE {target_table} AS
     SELECT
-        {setor_norm_sql(f'c."{CEP_COL_SETOR}"')} AS cod_setor_norm,
-        CAST(c."{CEP_COL_QUADRA}" AS VARCHAR) AS num_quadra,
-        CAST(c."{CEP_COL_FACE}" AS VARCHAR) AS num_face,
-        {cep_norm_sql(f'MIN(c."{CEP_COL_CEP}")')} AS cep
-    FROM read_csv('{path}', header=true, auto_detect=true) c
-    WHERE {where_clause}
+        cod_setor_norm,
+        num_quadra,
+        num_face,
+        MIN(cep) AS cep,
+        MIN(tipo_logradouro) AS tipo_logradouro,
+        MIN(logradouro) AS logradouro
+    FROM ({join_sql})
     GROUP BY 1, 2, 3
     """)
 
@@ -846,31 +939,42 @@ def materialize_censo_registros(
     con: duckdb.DuckDBPyConnection,
     *,
     staging_table: str = "censo_staging",
-    cohort_cpf_table: str = "cohort_cpf_por_censo",
     out_table: str = TABELA_CENSO_REGISTROS,
 ) -> None:
-    """Censo staging → registros, com 1 `cpf_norm` por pessoa (MIN se ambíguo).
+    """Censo staging → registros. `cpf_norm` fica NULL; a coorte carimba depois.
 
-    Evita subquery escalar: no DuckDB 1.x ela quebra se a coorte devolver
-    mais de uma linha, e `person_id_censo` sem prefixo pode não correlacionar.
+    Fonética uma vez por nome (CTE `phon`), split nas colunas `*_phon`.
     """
     from features import (
         NOME_MAE_COLUMNS,
         PESSOA_COLUMNS,
+        carregar_variantes,
         clean_name_sql,
         name_feature_columns_sql,
         normalize_sexo_sql,
+        phonetic_name_sql,
         select_list_sql,
     )
 
-    pessoa = name_feature_columns_sql("nome_completo_norm", col_map=PESSOA_COLUMNS)
+    carregar_variantes(con)
+    pessoa = name_feature_columns_sql(
+        "nome_completo_norm",
+        col_map=PESSOA_COLUMNS,
+        phon_col="nome_completo_phon",
+    )
     mae = {
         alias: f"NULLIF({expr}, '')"
         for alias, expr in name_feature_columns_sql(
-            "nome_mae_norm", col_map=NOME_MAE_COLUMNS
+            "nome_mae_norm",
+            col_map=NOME_MAE_COLUMNS,
+            phon_col="nome_mae_phon",
         ).items()
     }
-    sexo_n = normalize_sexo_sql("n.sexo_raw")
+    sexo_n = normalize_sexo_sql("sexo_raw")
+    phon_pessoa = phonetic_name_sql(
+        "coalesce(nome_completo_norm, '')", mapa="v.m"
+    )
+    phon_mae = phonetic_name_sql("coalesce(nome_mae_norm, '')", mapa="v.m")
     con.execute(f"""
     CREATE OR REPLACE TABLE {out_table} AS
     WITH norm AS (
@@ -879,25 +983,28 @@ def materialize_censo_registros(
             {clean_name_sql("nome_mae_inferido")} AS nome_mae_norm
         FROM {staging_table}
         WHERE person_id_censo IS NOT NULL
+    ),
+    phon AS (
+        SELECT n.*,
+            {phon_pessoa} AS nome_completo_phon,
+            {phon_mae} AS nome_mae_phon
+        FROM norm n
+        CROSS JOIN _variantes_map v
     )
     SELECT
-        'censo_' || n.person_id_censo AS unique_id, 'censo' AS origem,
-        o.cpf_norm,
+        'censo_' || person_id_censo AS unique_id, 'censo' AS origem,
+        CAST(NULL AS VARCHAR) AS cpf_norm,
         {select_list_sql(pessoa)},
-        n.data_nascimento,
+        data_nascimento,
         {select_list_sql(mae)},
         {sexo_n} AS sexo,
-        n.idade,
-        n.cep, CAST(n.uf AS VARCHAR) AS uf,
-        CAST(n.cod_municipio AS VARCHAR) AS cod_municipio,
+        idade,
+        cep, tipo_logradouro, logradouro, numero_logradouro,
+        CAST(uf AS VARCHAR) AS uf,
+        CAST(cod_municipio AS VARCHAR) AS cod_municipio,
         CAST(NULL AS INTEGER) AS ano_obito,
-        n.person_id_censo, n.id_domicilio
-    FROM norm n
-    LEFT JOIN (
-        SELECT person_id_censo, MIN(cpf_norm) AS cpf_norm
-        FROM {cohort_cpf_table}
-        GROUP BY person_id_censo
-    ) o ON o.person_id_censo = n.person_id_censo
+        person_id_censo, id_domicilio
+    FROM phon
     """)
     benchmark_checkpoint(con, out_table, f"SELECT COUNT(*) FROM {out_table}")
 
@@ -936,93 +1043,6 @@ def stamp_censo_cpf_from_cohort(
         WHERE cpf_norm IS NOT NULL
         """).fetchone()[0]
     return int(n)
-
-
-def materialize_gt_1a1(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    cohort_parquet: Path | None = None,
-    cohort_table: str = "cohort_dedup_raw",
-    out_table: str = "gt_1a1",
-) -> dict[str, int]:
-    """Pares 1:1 da `cohort_dedup` (lista toda confiável).
-
-    Critério estrutural: 1 CPF por Censo e 1 Censo por CPF. N:1 / 1:N saem em
-    `n_nao_1a1_descartada`. Alimenta `materialize_gt_no_subset`.
-    """
-    _load_cohort_table(con, cohort_parquet=cohort_parquet, cohort_table=cohort_table)
-    cpf_gt = cpf_norm_sql("CPF_NORM")
-    candidatos = f"{out_table}_candidatos"
-    con.execute(f"""
-    CREATE OR REPLACE TABLE {candidatos} AS
-    SELECT *,
-        COUNT(*) OVER (PARTITION BY person_id_censo) AS n_cpf_por_censo,
-        COUNT(*) OVER (PARTITION BY cpf_norm) AS n_censo_por_cpf
-    FROM (
-        SELECT DISTINCT
-            CAST(PERSON_ID_CENSO AS VARCHAR) AS person_id_censo,
-            {cpf_gt} AS cpf_norm
-        FROM {cohort_table}
-        WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
-    )
-    """)
-    con.execute(f"""
-    CREATE OR REPLACE TABLE {out_table} AS
-    SELECT person_id_censo, cpf_norm
-    FROM {candidatos}
-    WHERE n_cpf_por_censo = 1 AND n_censo_por_cpf = 1
-    """)
-    n_distintos = con.execute(f"SELECT COUNT(*) FROM {candidatos}").fetchone()[0]
-    n_1a1 = con.execute(f"SELECT COUNT(*) FROM {out_table}").fetchone()[0]
-    return {
-        "n_pares_coorte_nacional": int(n_distintos),
-        "n_pares_1a1_nacional": int(n_1a1),
-        "n_nao_1a1_descartada": int(n_distintos) - int(n_1a1),
-    }
-
-
-def materialize_gt_no_subset(
-    con: duckdb.DuckDBPyConnection,
-    *,
-    cohort_parquet: Path | None = None,
-    splink_view: str = SPLINK_INPUT_VIEW,
-    cohort_table: str = "cohort_dedup_raw",
-    pairs_table: str = "ground_truth_pairs",
-    subset_table: str = "gt_no_subset",
-    gt_table: str = "gt_1a1",
-) -> dict[str, int]:
-    """Pares 1:1 da coorte com os dois lados em `splink_view`.
-
-    Cria `gt_1a1` (nacional), `ground_truth_pairs` e `gt_no_subset` (recorte).
-    Toda a `cohort_dedup` é confiável; só N:1 / 1:N saem (`n_nao_1a1_descartada`).
-    """
-    counts = materialize_gt_1a1(
-        con,
-        cohort_parquet=cohort_parquet,
-        cohort_table=cohort_table,
-        out_table=gt_table,
-    )
-    con.execute(f"""
-    CREATE OR REPLACE TABLE {pairs_table} AS
-    SELECT
-        'censo_' || person_id_censo AS unique_id_censo,
-        'cpf_' || cpf_norm AS unique_id_cpf,
-        person_id_censo,
-        cpf_norm
-    FROM {gt_table}
-    """)
-    con.execute(f"""
-    CREATE OR REPLACE TABLE {subset_table} AS
-    SELECT gt.*
-    FROM {pairs_table} gt
-    JOIN {splink_view} c ON c.unique_id = gt.unique_id_censo
-    JOIN {splink_view} p ON p.unique_id = gt.unique_id_cpf
-    """)
-    n_subset = con.execute(f"SELECT COUNT(*) FROM {subset_table}").fetchone()[0]
-    return {
-        **counts,
-        "n_gt_no_subset": int(n_subset),
-    }
 
 
 def drop_splink_temp_tables(con: duckdb.DuckDBPyConnection) -> int:
@@ -1210,7 +1230,8 @@ def print_paths() -> None:
     print("recorte:", recorte_output_slug())
     print("CPF_ARQUIVO:", CPF_ARQUIVO)
     print("CENSO_PESSOAS_ARQUIVO:", CENSO_PESSOAS_ARQUIVO)
-    print("CENSO_CEP_ARQUIVO:", CENSO_CEP_ARQUIVO)
+    print("CENSO_ESPECIE_ARQUIVO:", CENSO_ESPECIE_ARQUIVO)
+    print("CENSO_LOGR_ARQUIVO:", CENSO_LOGR_ARQUIVO)
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)
     print("LISTA_OURO_ARQUIVO:", LISTA_OURO_ARQUIVO)
     print("CENSO_LIMPO:", CENSO_LIMPO)

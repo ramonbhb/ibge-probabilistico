@@ -10,6 +10,7 @@ from pathlib import Path
 # canonico -> variantes (só o que muda; o canônico não entra — o replace
 # deixa o nome como está se não achar variante)
 # CAMILY ≠ KEMELI ≠ CAMILA
+# KAUA = CAUA = KAUAN (Cauã e Kauan no registro)
 # JULIA ≠ GIULIA (nome italiano); JHULIA/JIULIA são grafia de JULIA
 # J+H no meio (JHONATAN, JHENIFER) = o mesmo nome, H ornamental
 GRAFIA: dict[str, list[str]] = {
@@ -41,8 +42,7 @@ GRAFIA: dict[str, list[str]] = {
     "NAYARA": ["NAIARA", "NAYARA"],
     "THAIS": ["TAIS", "THAYS", "TAYS", "THAIZ", "TAIZ", "TAHIS"],
     "CAIO": ["KAIO", "CAYO", "KAYO"],
-    "KAUA": ["CAUA"],
-    "KAUAN": ["CAUAN", "KAUANN", "CAUANN"],
+    "KAUA": ["CAUA", "KAUAN", "CAUAN", "KAUANN", "CAUANN"],
     "KAUANE": ["CAUANE", "KAUANY", "CAUANY", "KAUANNY", "CAUANNY"],
     "KAIQUE": [
         "CAIQUE", "KAYQUE", "CAYQUE", "KAIKE", "KAYKE", "KAYKY",
@@ -135,6 +135,16 @@ GRAFIA: dict[str, list[str]] = {
     "JEAN": ["GEAN", "JHAN", "JHEAN"],
     "JOAO": ["JHOAO"],
     "EDSON": ["EDISON", "EDDISON"],
+    # D mudo: EDI* = ED* (o I depois do D some na fala).
+    "EDNA": ["EDINA"],
+    "EDINALDO": ["EDNALDO"],
+    "EDIVAN": ["EDVAN"],
+    "EDINEI": ["EDNEI", "EDINEY", "EDNEY"],
+    "EDIVALDO": ["EDVALDO"],
+    "EDMILSON": ["EDIMILSON"],
+    "EDIMAR": ["EDMAR"],
+    "EDINALVA": ["EDNALVA"],
+    "EDIVANIA": ["EDVANIA"],
     "CLEITON": [
         "CLAYTON", "KLEITON", "KLAYTON", "CLAITON", "KLAITON",
     ],
@@ -346,6 +356,30 @@ EXTRA_GRAFIA: dict[str, list[str]] = {
     "DENISE": ["DENYSE", "DENNYSE", "DENNISE"],
     "DIEGO": ["DHIEGO", "DHYEGO"],
     "DOUGLAS": ["DOWGLAS"],
+    "EDCARLOS": ["EDICARLOS"],
+    "EDGAR": ["EDIGAR"],
+    "EDILENE": ["EDLENE"],
+    "EDILEUSA": ["EDLEUSA"],
+    "EDILEUZA": ["EDLEUZA"],
+    "EDINEIA": ["EDNEIA"],
+    "EDINEIDE": ["EDNEIDE"],
+    "EDINETE": ["EDNETE"],
+    "EDIVAL": ["EDVAL"],
+    "EDIVAM": ["EDVAM"],
+    "EDIVANA": ["EDVANA"],
+    "EDIVANE": ["EDVANE"],
+    "EDIVAR": ["EDVAR"],
+    "EDMARA": ["EDIMARA"],
+    "EDMUNDO": ["EDIMUNDO"],
+    "EDINALDA": ["EDNALDA"],
+    "EDINAEL": ["EDNAEL"],
+    "EDINAN": ["EDNAN"],
+    "EDINAR": ["EDNAR"],
+    "EDINELSON": ["EDNELSON"],
+    "EDNILDE": ["EDINILDE"],
+    "EDNILSON": ["EDINILSON"],
+    "EDNILTON": ["EDINILTON"],
+    "EDNOLIA": ["EDINOLIA"],
     "ELAINE": [
         "ELAYNNE", "HELAINE", "HELAYNE", "ELLAYNE", "ELAINNE",
         "HELLAYNE", "HELAYNNE",
@@ -401,8 +435,7 @@ EXTRA_GRAFIA: dict[str, list[str]] = {
     "JULIA": ["JHULYA", "JHULLYA"],
     "JULIANA": ["JULIANNA", "JULLYANA", "JULYANNA", "JULLIANA", "JULLYANNA"],
     "JULIANE": ["JULYANNE", "JHULIANE", "JULLYANE", "JULLIANE"],
-    "KAUA": ["KAWA", "CAWA"],
-    "KAUAN": ["KAWAN", "CAWAN", "KHAUAN"],
+    "KAUA": ["KAWA", "CAWA", "KAWAN", "CAWAN", "KHAUAN"],
     "KAUANE": ["KAUANNE", "KAWANE", "KAWANNE", "CAUANNE"],
     "KAUE": ["KAWE"],
     "KEILA": ["QUEILA"],

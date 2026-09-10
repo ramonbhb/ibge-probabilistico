@@ -304,26 +304,41 @@ def strip_noise_sql(expr: str) -> str:
     return f"trim(regexp_replace({out}, '\\s+', ' ', 'g'))"
 
 
-def _sql_str(text: str) -> str:
-    return "'" + text.replace("'", "''") + "'"
+def carregar_variantes(con) -> None:
+    """Tabela `_variantes_map` (um MAP) a partir de data/nomes_variantes.csv.
+
+    Chamar uma vez por conexão antes de `aplicar_variantes_sql` / fonética.
+    """
+    csv_path = str(_NOMES_VARIANTES_CSV).replace("'", "''")
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE _nomes_variantes AS
+        SELECT variante, canonico
+        FROM read_csv_auto('{csv_path}', header=true)
+        WHERE variante IS NOT NULL AND canonico IS NOT NULL
+          AND variante <> canonico
+        """
+    )
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE _variantes_map AS
+        SELECT MAP(list(variante), list(canonico)) AS m
+        FROM _nomes_variantes
+        """
+    )
 
 
-_MAPA_VARIANTES_SQL = "MAP {" + ", ".join(
-    f"{_sql_str(v)}: {_sql_str(c)}" for v, c in _VARIANTES
-) + "}"
-
-
-def aplicar_variantes_sql(expr: str) -> str:
+def aplicar_variantes_sql(expr: str, mapa: str = "m") -> str:
     """aplicar_variantes_tokens() em SQL: lookup por token, nunca substring.
 
-    MAP + split do canônico cobre composto (`ROSAMARIA` → `ROSA` `MARIA`).
-    Equivale ao replace `' KEMILI '` → `' KEMELI '` das partículas.
+    `mapa` é a coluna MAP no FROM (ex.: `CROSS JOIN _variantes_map`). Subquery
+    dentro do `list_transform` o DuckDB não aceita.
     """
     safe = f"coalesce({expr}, '')"
     toks = (
         f"flatten(list_transform(string_split({safe}, ' '), "
         f"_vtok -> string_split("
-        f"coalesce({_MAPA_VARIANTES_SQL}[_vtok], _vtok), ' ')))"
+        f"coalesce({mapa}[_vtok], _vtok), ' ')))"
     )
     return (
         f"CASE WHEN {safe} = '' THEN '' "
@@ -373,9 +388,9 @@ def phonetic_token_sql(expr: str) -> str:
     return dedupe_consecutive_sql(_phonetic_map_sql(expr))
 
 
-def phonetic_name_sql(norm_col: str) -> str:
+def phonetic_name_sql(norm_col: str, mapa: str = "m") -> str:
     """full_name_phon_basic() em SQL: variantes, depois fonética por token."""
-    canon = aplicar_variantes_sql(norm_col)
+    canon = aplicar_variantes_sql(norm_col, mapa=mapa)
     token_expr = phonetic_token_sql("_tok")
     tokens = f"list_transform(string_split({canon}, ' '), _tok -> {token_expr})"
     return f"array_to_string(list_filter({tokens}, _v -> _v <> ''), ' ')"
@@ -428,21 +443,27 @@ def name_feature_columns_sql(
     norm_col: str,
     *,
     col_map: dict[str, str] | None = None,
+    phon_col: str | None = None,
 ) -> dict[str, str]:
     """Colunas de nome (split + fonética) a partir de coluna já limpa.
 
     Espera `clean_name_sql` aplicado antes (partículas removidas, vazio = NULL).
-    O nome limpo não muda. Variantes de grafia entram só na fonética, que é
-    calculada uma vez no nome completo e repartida por split.
+    O nome limpo não muda. Variantes de grafia entram só na fonética.
+
+    Passe `phon_col` se a fonética já foi materializada numa CTE — o split
+    das partes `*_phon` lê essa coluna, sem recopiar o MAP no SELECT.
     """
     safe = f"coalesce({norm_col}, '')"
     partes = _split_parts_sql(safe)
-    completo_phon = phonetic_name_sql(safe)
-    partes_phon = _split_parts_sql(completo_phon)
+    if phon_col is None:
+        phon_ref = phonetic_name_sql(safe)
+    else:
+        phon_ref = f"coalesce({phon_col}, '')"
+    partes_phon = _split_parts_sql(phon_ref)
 
     cols = {
         "nome_completo_norm": norm_col,
-        "nome_completo_phon": _nullif_empty_sql(completo_phon),
+        "nome_completo_phon": _nullif_empty_sql(phon_ref),
         "primeiro_nome": _nullif_empty_sql(partes["primeiro_nome"]),
         "nome_meio": _nullif_empty_sql(partes["nome_meio"]),
         "ultimo_nome": _nullif_empty_sql(partes["ultimo_nome"]),

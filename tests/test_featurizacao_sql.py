@@ -15,8 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from features import (  # noqa: E402
     clean_name,
     clean_name_sql,
+    carregar_variantes,
     full_name_phon_basic,
     name_feature_columns_sql,
+    phonetic_name_sql,
     select_list_sql,
     split_name_three_parts,
 )
@@ -109,16 +111,25 @@ def resultado_sql() -> dict[str, dict[str, str | None]]:
     from features import PESSOA_COLUMNS
 
     con = duckdb.connect()
+    carregar_variantes(con)
     con.execute("CREATE TABLE bruto (id INTEGER, nome VARCHAR)")
     con.executemany(
         "INSERT INTO bruto VALUES (?, ?)", list(enumerate(NOMES))
     )
-    cols = name_feature_columns_sql("nome_norm", col_map=PESSOA_COLUMNS)
+    cols = name_feature_columns_sql(
+        "nome_norm", col_map=PESSOA_COLUMNS, phon_col="nome_completo_phon_val"
+    )
     sql = f"""
     WITH norm AS (
         SELECT id, {clean_name_sql('nome')} AS nome_norm FROM bruto
+    ),
+    phon AS (
+        SELECT id, nome_norm,
+            {phonetic_name_sql("coalesce(nome_norm, '')", mapa="v.m")} AS nome_completo_phon_val
+        FROM norm
+        CROSS JOIN _variantes_map v
     )
-    SELECT id, {select_list_sql(cols)} FROM norm ORDER BY id
+    SELECT id, {select_list_sql(cols)} FROM phon ORDER BY id
     """
     linhas = con.execute(sql).fetchall()
     nomes_col = [d[0] for d in con.execute(sql).description]
@@ -240,6 +251,7 @@ def test_benchmark_list_reduce() -> None:
 
     n = int(os.environ.get("BENCH_SQL_N", 5_000_000))
     con = duckdb.connect()
+    carregar_variantes(con)
     con.execute(
         f"""
         CREATE TABLE amostra AS
@@ -251,11 +263,17 @@ def test_benchmark_list_reduce() -> None:
         FROM range({n}) t(i)
         """
     )
-    cols = name_feature_columns_sql("nome_norm")
+    cols = name_feature_columns_sql("nome_norm", phon_col="nome_completo_phon_val")
     sql = f"""
     CREATE TABLE saida AS
-    WITH norm AS (SELECT {clean_name_sql('nome')} AS nome_norm FROM amostra)
-    SELECT {select_list_sql(cols)} FROM norm
+    WITH norm AS (SELECT {clean_name_sql('nome')} AS nome_norm FROM amostra),
+    phon AS (
+        SELECT nome_norm,
+            {phonetic_name_sql("coalesce(nome_norm, '')", mapa="v.m")} AS nome_completo_phon_val
+        FROM norm
+        CROSS JOIN _variantes_map v
+    )
+    SELECT {select_list_sql(cols)} FROM phon
     """
     inicio = time.perf_counter()
     con.execute(sql)
