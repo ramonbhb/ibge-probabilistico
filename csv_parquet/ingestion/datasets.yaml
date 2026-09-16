@@ -1,0 +1,71 @@
+datasets:
+  #- name: censo_pessoas_2022
+  # input_path: /data/ramon.goncalves/T_UPESSCRI.csv
+  # output_path: /data/singed/bases/bronze/censo/censo_pessoas_2022_20260505.parquet 
+  #  read_options:
+  #    delim: ","
+  #    quote: '"'
+  #    escape: "\\"
+  #    encoding: "utf-8"
+  #    header: true
+  
+  - name: anatel
+    input_path: /data/ramon.goncalves/anatel/Anatel_10columns.csv
+    output_path: /data/singed/bases/bronze/anatel/anatel.parquet
+    read_options:
+      delim: ";"
+      quote: '"'
+      escape: "\\"
+      encoding: "latin-1"
+      header: true  
+
+  #- name: censo_cnefe2_endereco_2022
+  #  input_path: /data/ramon.goncalves/T_CNEFE_ENDERECO2.csv
+  #  output_path: /data/singed/bases/bronze/censo/censo_endereco2_2022_20260505_new.parquet
+  #  read_options:
+  #    delim: ","
+  #    quote: '"'
+  #    escape: "\\"
+  #    encoding: "windows-1252"
+  #    header: true
+
+  #- name: censo_familia_2022
+  #  input_path: /data/ramon.goncalves/T_UDOMICRI.csv
+  #  output_path: /data/singed/bases/bronze/censo/censo_familia_2022_20260505.parquet
+  #  read_options:
+  #    delim: ","
+  #    quote: '"'
+  #    escape: "\\"
+  #    encoding: "latin-1"
+  #    header: true
+  
+  # - name: cadunico_pessoas_2022
+  #  input_path: /data/singed/bases/raw/CadUnico/CadUnico_2022/ARQ_PESSOA_PAB_24122022_V2.TXT
+  #  output_path: /data/singed/bases/bronze/cadunico/cadunico_pessoas_2022.parquet
+  #
+  #  read_options:
+  #    delim: ";"
+  #    quote: '"'
+  #    escape: "\\"
+  #    encoding: "latin-1"
+  #    header: true
+  #- name: cadunico_familia_2022
+  #  input_path: /data/singed/bases/raw/CadUnico/CadUnico_2022/ARQ_FAMILIA_PAB_24122022_V2.TXT
+  #  output_path: /data/singed/bases/bronze/cadunico/cadunico_familia_2022.parquet
+  #
+  #  read_options:
+  #    delim: ";"
+  #    quote: '"'
+  #    escape: "\\"
+  #    encoding: "latin-1"
+  #    header: true
+  #- name: cpf
+  # input_path: /data/singed/bases/raw/CPF/CPF.csv
+  # output_path: /data/singed/bases/bronze/CPF/cpf.parquet
+  #
+  # read_options:
+  #   delim: ","
+  #   quote: '"'
+  #   escape: "\\"
+  #   encoding: "latin-1"
+  #   header: true
