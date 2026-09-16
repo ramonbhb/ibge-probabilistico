@@ -1,4 +1,4 @@
-"""Contrato do JSON (02) e das 11 regras de predição (02b)."""
+"""Contrato do JSON (02) e das 12 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -27,17 +27,17 @@ def _model_path() -> Path | None:
     return None
 
 
-def _blocking_from_02b() -> list[tuple[str, ...]]:
+def _blocking_src_02b() -> str:
     nb = json.loads(_NOTEBOOK_02B.read_text(encoding="utf-8"))
-    src = None
     for cell in nb["cells"]:
         text = "".join(cell.get("source", []))
         if "blocking_rules = [" in text:
-            src = text
-            break
-    if src is None:
-        raise AssertionError("02b sem célula blocking_rules")
-    return [tuple(_QUOTED.findall(args)) for args in _BLOCK_ON.findall(src)]
+            return text
+    raise AssertionError("02b sem célula blocking_rules")
+
+
+def _blocking_from_02b() -> list[tuple[str, ...]]:
+    return [tuple(_QUOTED.findall(args)) for args in _BLOCK_ON.findall(_blocking_src_02b())]
 
 
 @pytest.fixture(scope="module")
@@ -104,6 +104,18 @@ def test_onze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
     assert ("data_nascimento", "sexo", "cep") in blocking_cols
     assert ("data_nascimento", "cep") not in blocking_cols
     assert ("data_nascimento", "uf", "sexo", "cep") not in blocking_cols
+
+
+def test_doze_regra_dl_sql() -> None:
+    src = _blocking_src_02b()
+    assert src.count("block_on(") == 11
+    assert "damerau_levenshtein" in src
+    assert "l.primeiro_nome_phon" in src
+    assert "l.sexo = r.sexo" in src
+    assert "l.ano_nascimento = r.ano_nascimento" in src
+    assert "l.mes_nascimento = r.mes_nascimento" in src
+    assert "l.ultimo_nome_phon = r.ultimo_nome_phon" in src
+    assert "* 6" in src
 
 
 def test_cpf_fora_do_blocking_de_predicao(
@@ -247,8 +259,12 @@ def test_02_nome_completo_token_aware() -> None:
     assert "[-1]" in src
     assert "jw_ultimo_095_sql" in src
     assert "NameComparison(\n        'nome_completo_phon'" not in src
-    assert "NameComparison(\n        'primeiro_nome_phon'" in src
+    assert "NameComparison(\n        'primeiro_nome_phon'" not in src
     assert "NameComparison(\n        'ultimo_nome_phon'" in src
+    assert "damerau_levenshtein" in src
+    assert "dl_completo_1_sql" in src
+    assert "dl_primeiro_1_sql" in src
+    assert "primeiro_nome_phon" in src
     jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
     assert jw95.find("[-1]") < jw95.find("jaro_winkler_similarity")
 
@@ -269,3 +285,31 @@ def test_nome_completo_json_token_aware(model: dict) -> None:
         if "jaro_winkler_similarity" in sql:
             assert "[-1]" in sql
             assert sql.find("string_split") < sql.find("jaro_winkler_similarity")
+
+
+def test_nome_completo_json_damerau(model: dict) -> None:
+    completo = next(
+        c for c in model["comparisons"] if c["output_column_name"] == "nome_completo_phon"
+    )
+    sqls = " ".join(lvl.get("sql_condition", "") for lvl in completo["comparison_levels"])
+    if "damerau_levenshtein" not in sqls:
+        pytest.skip(
+            "JSON antigo sem DL no completo — retreinar notebooks/02_treinar_splink.ipynb"
+        )
+    assert "<= 1" in sqls
+    assert "<= 2" in sqls
+
+
+def test_primeiro_nome_json_damerau(model: dict) -> None:
+    primeiro = next(
+        c
+        for c in model["comparisons"]
+        if c["output_column_name"] == "primeiro_nome_phon"
+    )
+    sqls = " ".join(lvl.get("sql_condition", "") for lvl in primeiro["comparison_levels"])
+    if "damerau_levenshtein" not in sqls:
+        pytest.skip(
+            "JSON antigo sem DL no primeiro nome — "
+            "retreinar notebooks/02_treinar_splink.ipynb"
+        )
+    assert "* 6" in sqls or " * 6 " in sqls

@@ -9,7 +9,7 @@ Pergunta operacional: **dado que o pipeline associou um CPF, qual a chance de n�
 - Esquerda: Censos da [`LISTA_OURO_ARQUIVO`](config.py) que existem em `censo_limpo` (`censo_ouro`).
 - Direita: `cpf_limpo` do estado, **sem** tirar os CPFs da ouro (`cpf_limpo_aplicacao` não serve).
 - Verdade: pares 1:1 da lista (`ID_MORADOR` ↔ `cpf_cpf`). Quem não está nos dois limpos é cobertura, não erro do modelo.
-- Sistema: JSON do 02, 11 regras do 02b, `predict(p ≥ 0,5)`, atribuição do 04 (`T`, veto de mãe, teto `MAX_CENSOS_POR_CPF`).
+- Sistema: JSON do 02, 12 regras do 02b, `predict(p ≥ 0,5)`, atribuição do 04 (`T`, veto de mãe, teto `MAX_CENSOS_POR_CPF`).
 
 Isso avalia o **pipeline**, não o EM isolado.
 

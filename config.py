@@ -197,7 +197,8 @@ def set_filtros(
 # =============================================================================
 #
 # OUTPUT_DIR_BASE, OUTPUT_DIR (subdir do recorte), CENSO_DIR, CENSO_RAW_DIR,
-# CENSO_ESPECIE_ARQUIVO, CENSO_LOGR_ARQUIVO, CENSO_PESSOAS_ARQUIVO, CPF_ARQUIVO,
+# CENSO_ESPECIE_ARQUIVO, CENSO_LOGR_ARQUIVO, CENSO_PESSOAS_ARQUIVO,
+# CENSO_PES_NOME_ARQUIVO, CPF_ARQUIVO, CPF_CPF_NOME_ARQUIVO,
 # COHORT_DIR, COHORT_DEDUP_ARQUIVO, LISTA_OURO_ARQUIVO, DUCKDB_TEMP_DIR,
 # DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
 
@@ -247,10 +248,24 @@ CENSO_PESSOAS_ARQUIVO = Path(
     )
 ).expanduser()
 
+CENSO_PES_NOME_ARQUIVO = Path(
+    os.environ.get(
+        "CENSO_PES_NOME_ARQUIVO",
+        CENSO_DIR / "censo_pes_nome.parquet",
+    )
+).expanduser()
+
 CPF_ARQUIVO = Path(
     os.environ.get(
         "CPF_ARQUIVO",
         Path.home() / "singed/bases/bronze/cpf/cpf.parquet",
+    )
+).expanduser()
+
+CPF_CPF_NOME_ARQUIVO = Path(
+    os.environ.get(
+        "CPF_CPF_NOME_ARQUIVO",
+        CPF_ARQUIVO.parent / "cpf_cpf_nome.parquet",
     )
 ).expanduser()
 
@@ -320,6 +335,14 @@ CPF_COL_LOGRADOURO = "NOM_LOGRADOURO"
 CPF_COL_NUM_LOGRADOURO = "NUM_LOGRADOURO"
 # Opcional no bronze: o NB00 detecta a presença e cai para NULL se não existir.
 CPF_COL_ANO_OBITO = "ANO_OBITO"
+
+# Parquets de nome já fonético. Confira no DESCRIBE do 00; MAE vazio = não entra.
+CENSO_NOME_COL_ID = "ID_MORADOR"
+CENSO_NOME_COL_PHON = "nome"
+CENSO_NOME_COL_MAE_PHON = ""
+CPF_NOME_COL_CPF = "COD_CPF"
+CPF_NOME_COL_PHON = "nome"
+CPF_NOME_COL_MAE_PHON = ""
 
 CENSO_COL_ID_MORADOR = "ID_MORADOR"
 CENSO_COL_ID_DOMICILIO = "ID_DOMICILIO"
@@ -943,20 +966,25 @@ def materialize_censo_registros(
 ) -> None:
     """Censo staging → registros. `cpf_norm` fica NULL; a coorte carimba depois.
 
-    Fonética uma vez por nome (CTE `phon`), split nas colunas `*_phon`.
+    `nome_completo_phon` já veio do join com censo_pes_nome. Aqui só limpa e
+    parte primeiro/meio/último (limpo e fonético).
     """
     from features import (
         NOME_MAE_COLUMNS,
         PESSOA_COLUMNS,
-        carregar_variantes,
         clean_name_sql,
         name_feature_columns_sql,
         normalize_sexo_sql,
-        phonetic_name_sql,
         select_list_sql,
     )
 
-    carregar_variantes(con)
+    cols = {r[0] for r in con.execute(f"DESCRIBE {staging_table}").fetchall()}
+    if "nome_completo_phon" not in cols:
+        raise RuntimeError(
+            f"{staging_table} sem nome_completo_phon; "
+            "faça o LEFT JOIN com censo_pes_nome no 00."
+        )
+    mae_phon_col = "nome_mae_phon" if "nome_mae_phon" in cols else "nome_mae_norm"
     pessoa = name_feature_columns_sql(
         "nome_completo_norm",
         col_map=PESSOA_COLUMNS,
@@ -967,14 +995,13 @@ def materialize_censo_registros(
         for alias, expr in name_feature_columns_sql(
             "nome_mae_norm",
             col_map=NOME_MAE_COLUMNS,
-            phon_col="nome_mae_phon",
+            phon_col=mae_phon_col,
         ).items()
     }
     sexo_n = normalize_sexo_sql("sexo_raw")
-    phon_pessoa = phonetic_name_sql(
-        "coalesce(nome_completo_norm, '')", mapa="v.m"
-    )
-    phon_mae = phonetic_name_sql("coalesce(nome_mae_norm, '')", mapa="v.m")
+    logr = ""
+    if "tipo_logradouro" in cols:
+        logr = ", tipo_logradouro, logradouro, numero_logradouro"
     con.execute(f"""
     CREATE OR REPLACE TABLE {out_table} AS
     WITH norm AS (
@@ -983,13 +1010,6 @@ def materialize_censo_registros(
             {clean_name_sql("nome_mae_inferido")} AS nome_mae_norm
         FROM {staging_table}
         WHERE person_id_censo IS NOT NULL
-    ),
-    phon AS (
-        SELECT n.*,
-            {phon_pessoa} AS nome_completo_phon,
-            {phon_mae} AS nome_mae_phon
-        FROM norm n
-        CROSS JOIN _variantes_map v
     )
     SELECT
         'censo_' || person_id_censo AS unique_id, 'censo' AS origem,
@@ -999,12 +1019,12 @@ def materialize_censo_registros(
         {select_list_sql(mae)},
         {sexo_n} AS sexo,
         idade,
-        cep, tipo_logradouro, logradouro, numero_logradouro,
+        cep{logr},
         CAST(uf AS VARCHAR) AS uf,
         CAST(cod_municipio AS VARCHAR) AS cod_municipio,
         CAST(NULL AS INTEGER) AS ano_obito,
         person_id_censo, id_domicilio
-    FROM phon
+    FROM norm
     """)
     benchmark_checkpoint(con, out_table, f"SELECT COUNT(*) FROM {out_table}")
 
@@ -1230,6 +1250,8 @@ def print_paths() -> None:
     print("recorte:", recorte_output_slug())
     print("CPF_ARQUIVO:", CPF_ARQUIVO)
     print("CENSO_PESSOAS_ARQUIVO:", CENSO_PESSOAS_ARQUIVO)
+    print("CENSO_PES_NOME_ARQUIVO:", CENSO_PES_NOME_ARQUIVO)
+    print("CPF_CPF_NOME_ARQUIVO:", CPF_CPF_NOME_ARQUIVO)
     print("CENSO_ESPECIE_ARQUIVO:", CENSO_ESPECIE_ARQUIVO)
     print("CENSO_LOGR_ARQUIVO:", CENSO_LOGR_ARQUIVO)
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)

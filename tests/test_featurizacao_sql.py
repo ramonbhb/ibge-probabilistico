@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from features import (  # noqa: E402
     clean_name,
     clean_name_sql,
-    carregar_variantes,
     full_name_phon_basic,
     name_feature_columns_sql,
     phonetic_name_sql,
@@ -63,6 +62,9 @@ NOMES = [
     "Kemili Silva",
     "Rosamaria Santos",
     "KEMILIANE SOUZA",
+    "EDGARD SILVA",
+    "EDVALDO COSTA",
+    "ADRIANA PEDRO",
 ]
 
 CHAVES = [
@@ -111,7 +113,6 @@ def resultado_sql() -> dict[str, dict[str, str | None]]:
     from features import PESSOA_COLUMNS
 
     con = duckdb.connect()
-    carregar_variantes(con)
     con.execute("CREATE TABLE bruto (id INTEGER, nome VARCHAR)")
     con.executemany(
         "INSERT INTO bruto VALUES (?, ?)", list(enumerate(NOMES))
@@ -125,9 +126,8 @@ def resultado_sql() -> dict[str, dict[str, str | None]]:
     ),
     phon AS (
         SELECT id, nome_norm,
-            {phonetic_name_sql("coalesce(nome_norm, '')", mapa="v.m")} AS nome_completo_phon_val
+            {phonetic_name_sql("coalesce(nome_norm, '')")} AS nome_completo_phon_val
         FROM norm
-        CROSS JOIN _variantes_map v
     )
     SELECT id, {select_list_sql(cols)} FROM phon ORDER BY id
     """
@@ -174,22 +174,20 @@ def test_cedilha_e_th_na_fonetica() -> None:
     assert full_name_phon_basic(clean_name("RHUAN") or "") == "RUAN"
 
 
-def test_variantes_so_no_fonetico() -> None:
-    """nome_completo fica o original; grafia/composto só no *_phon."""
+def test_lista_variantes_nao_entra_na_fonetica() -> None:
+    """CSV de variantes não colapsa grafia; nome_completo permanece o limpo."""
     assert clean_name("KEMILI SILVA") == "KEMILI SILVA"
     assert clean_name("ROSAMARIA SANTOS") == "ROSAMARIA SANTOS"
-    assert full_name_phon_basic("KEMILI SILVA") == full_name_phon_basic("KEMELI SILVA")
-    assert full_name_phon_basic("ROSAMARIA SANTOS") == full_name_phon_basic(
+    assert full_name_phon_basic("KEMILI SILVA") != full_name_phon_basic("KEMELI SILVA")
+    assert full_name_phon_basic("ROSAMARIA SANTOS") != full_name_phon_basic(
         "ROSA MARIA SANTOS"
     )
-    # substring: KEMILI isolado não pode alterar KEMILIANE
-    assert full_name_phon_basic("KEMILIANE") != full_name_phon_basic("KEMELI")
     ref = referencia_python("Rosamaria Santos")
     assert ref["nome_completo"] == "ROSAMARIA SANTOS"
     assert ref["primeiro_nome"] == "ROSAMARIA"
-    assert ref["nome_completo_phon"] == full_name_phon_basic("ROSA MARIA SANTOS")
-    assert ref["primeiro_nome_phon"] == full_name_phon_basic("ROSA")
-    assert ref["nome_meio_phon"] == full_name_phon_basic("MARIA")
+    assert ref["nome_completo_phon"] == full_name_phon_basic("ROSAMARIA SANTOS")
+    assert ref["primeiro_nome_phon"] == full_name_phon_basic("ROSAMARIA")
+    assert ref["nome_meio_phon"] is None
 
 
 def test_ch_so_x_antes_de_vogal() -> None:
@@ -251,7 +249,6 @@ def test_benchmark_list_reduce() -> None:
 
     n = int(os.environ.get("BENCH_SQL_N", 5_000_000))
     con = duckdb.connect()
-    carregar_variantes(con)
     con.execute(
         f"""
         CREATE TABLE amostra AS
@@ -269,9 +266,8 @@ def test_benchmark_list_reduce() -> None:
     WITH norm AS (SELECT {clean_name_sql('nome')} AS nome_norm FROM amostra),
     phon AS (
         SELECT nome_norm,
-            {phonetic_name_sql("coalesce(nome_norm, '')", mapa="v.m")} AS nome_completo_phon_val
+            {phonetic_name_sql("coalesce(nome_norm, '')")} AS nome_completo_phon_val
         FROM norm
-        CROSS JOIN _variantes_map v
     )
     SELECT {select_list_sql(cols)} FROM phon
     """

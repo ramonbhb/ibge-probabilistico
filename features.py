@@ -193,11 +193,25 @@ def full_name_norm(name) -> str:
     return " ".join(tokenize_name(name))
 
 
+# Só estes três tokens; a lista em data/nomes_variantes.csv não entra na fonética.
+_TOKEN_AJUSTE = {"EDGARD": "EDGAR", "DAVID": "DAVI", "ISTER": "ESTER"}
+_EPENTESE_D = re.compile(r"^(.)D([^AEIOUR])")
+
+
+def _ajustar_token_antes_fonetica(token: str) -> str:
+    token = _TOKEN_AJUSTE.get(token, token)
+    return _EPENTESE_D.sub(r"\1DI\2", token)
+
+
 def full_name_phon_basic(name) -> str:
-    """Grafia canônica por token, depois fonética. O nome limpo não entra aqui."""
+    """MAP de 3 tokens, epêntese D, depois fonética. O nome limpo não entra aqui."""
     base = " ".join(tokenize_name(name))
-    canon = aplicar_variantes_tokens(base)
-    vals = [br_phonetic_basic_token(t) for t in canon.split()] if canon else []
+    if not base:
+        return ""
+    vals = [
+        br_phonetic_basic_token(_ajustar_token_antes_fonetica(t))
+        for t in base.split()
+    ]
     return " ".join(v for v in vals if v)
 
 
@@ -388,11 +402,19 @@ def phonetic_token_sql(expr: str) -> str:
     return dedupe_consecutive_sql(_phonetic_map_sql(expr))
 
 
-def phonetic_name_sql(norm_col: str, mapa: str = "m") -> str:
-    """full_name_phon_basic() em SQL: variantes, depois fonética por token."""
-    canon = aplicar_variantes_sql(norm_col, mapa=mapa)
-    token_expr = phonetic_token_sql("_tok")
-    tokens = f"list_transform(string_split({canon}, ' '), _tok -> {token_expr})"
+def phonetic_name_sql(norm_col: str) -> str:
+    """full_name_phon_basic() em SQL: 3 tokens, epêntese D, fonética por token."""
+    safe = f"coalesce({norm_col}, '')"
+    mapped = (
+        "CASE _tok "
+        "WHEN 'EDGARD' THEN 'EDGAR' "
+        "WHEN 'DAVID' THEN 'DAVI' "
+        "WHEN 'ISTER' THEN 'ESTER' "
+        "ELSE _tok END"
+    )
+    ajustado = f"regexp_replace({mapped}, '^(.)D([^AEIOUR])', '\\1DI\\2')"
+    token_expr = phonetic_token_sql(ajustado)
+    tokens = f"list_transform(string_split({safe}, ' '), _tok -> {token_expr})"
     return f"array_to_string(list_filter({tokens}, _v -> _v <> ''), ' ')"
 
 
@@ -448,10 +470,10 @@ def name_feature_columns_sql(
     """Colunas de nome (split + fonética) a partir de coluna já limpa.
 
     Espera `clean_name_sql` aplicado antes (partículas removidas, vazio = NULL).
-    O nome limpo não muda. Variantes de grafia entram só na fonética.
+    O nome limpo não muda. Ajustes de grafia (3 tokens + epêntese) só no `*_phon`.
 
     Passe `phon_col` se a fonética já foi materializada numa CTE — o split
-    das partes `*_phon` lê essa coluna, sem recopiar o MAP no SELECT.
+    das partes `*_phon` lê essa coluna, sem recopiar a expressão no SELECT.
     """
     safe = f"coalesce({norm_col}, '')"
     partes = _split_parts_sql(safe)
