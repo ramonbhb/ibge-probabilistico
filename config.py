@@ -916,17 +916,17 @@ def materialize_cohort_cpf_por_censo(
     con: duckdb.DuckDBPyConnection,
     *,
     cohort_parquet: Path | None = None,
-    cohort_table: str = "cohort_dedup_raw",
+    cohort_table: str = "lista_ouro_raw",
     out_table: str = "cohort_cpf_por_censo",
 ) -> dict[str, int]:
-    """Um `cpf_norm` por `person_id_censo` a partir da coorte (MIN se ambíguo).
+    """Um `cpf_norm` por `person_id_censo` a partir da lista de ouro (MIN se ambíguo).
 
-    Carimba o Censo no NB00/00b. Não é blocking de predição. Toda a
-    `cohort_dedup` é confiável; ambiguidade N CPFs por Censo não deve ocorrer.
+    Carimba o Censo no NB00/00b com `ID_MORADOR` + `cpf_cpf` de
+    LISTA_OURO_ARQUIVO. Não é blocking de predição.
     """
     _load_cohort_table(con, cohort_parquet=cohort_parquet, cohort_table=cohort_table)
-    cpf_gt = cpf_norm_sql("CPF_NORM")
-    pid = "CAST(PERSON_ID_CENSO AS VARCHAR)"
+    cpf_gt = cpf_norm_sql('"cpf_cpf"')
+    pid = 'CAST("ID_MORADOR" AS VARCHAR)'
     con.execute(f"""
     CREATE OR REPLACE TABLE {out_table} AS
     SELECT
@@ -934,7 +934,7 @@ def materialize_cohort_cpf_por_censo(
         MIN({cpf_gt}) AS cpf_norm,
         COUNT(DISTINCT {cpf_gt}) AS n_cpf_distintos
     FROM {cohort_table}
-    WHERE PERSON_ID_CENSO IS NOT NULL AND CPF_NORM IS NOT NULL
+    WHERE "ID_MORADOR" IS NOT NULL AND "cpf_cpf" IS NOT NULL
     GROUP BY {pid}
     """)
     n_dup = con.execute(f"""
@@ -964,7 +964,7 @@ def materialize_censo_registros(
     staging_table: str = "censo_staging",
     out_table: str = TABELA_CENSO_REGISTROS,
 ) -> None:
-    """Censo staging → registros. `cpf_norm` fica NULL; a coorte carimba depois.
+    """Censo staging → registros. `cpf_norm` fica NULL; a lista de ouro carimba depois.
 
     `nome_completo_phon` já veio do join com censo_pes_nome. Aqui só limpa e
     parte primeiro/meio/último (limpo e fonético).

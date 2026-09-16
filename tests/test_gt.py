@@ -1,4 +1,4 @@
-"""Carimbo de CPF no Censo a partir da coorte (treino). Avaliação da ouro é o 03b."""
+"""Carimbo de CPF no Censo a partir da lista de ouro (treino). Avaliação da ouro é o 03b."""
 
 from __future__ import annotations
 
@@ -15,16 +15,16 @@ from config import (  # noqa: E402
 )
 
 
-def test_stamp_censo_coorte_com_min(tmp_path: Path) -> None:
+def test_stamp_censo_lista_ouro_com_min(tmp_path: Path) -> None:
     con = duckdb.connect()
-    path = tmp_path / "cohort.parquet"
+    path = tmp_path / "regra1.parquet"
     con.execute(f"""
     COPY (
         SELECT * FROM (VALUES
             ('A', '1'),
             ('B', '3'),
             ('B', '2')
-        ) v(PERSON_ID_CENSO, CPF_NORM)
+        ) v("ID_MORADOR", "cpf_cpf")
     ) TO '{path}' (FORMAT PARQUET)
     """)
     con.execute(
