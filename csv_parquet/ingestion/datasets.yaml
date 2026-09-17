@@ -1,32 +1,41 @@
 datasets:
-  #- name: censo_pessoas_2022
-  # input_path: /data/ramon.goncalves/T_UPESSCRI.csv
-  # output_path: /data/singed/bases/bronze/censo/censo_pessoas_2022_20260505.parquet 
-  #  read_options:
-  #    delim: ","
-  #    quote: '"'
-  #    escape: "\\"
-  #    encoding: "utf-8"
-  #    header: true
-  
   - name: anatel
     input_path: /data/ramon.goncalves/anatel/Anatel_10columns.csv
     output_path: /data/singed/bases/bronze/anatel/anatel.parquet
     read_options:
       delim: ";"
       quote: '"'
-      escape: "\\"
       encoding: "latin-1"
-      header: true  
+      header: true
 
-  #- name: censo_cnefe2_endereco_2022
-  #  input_path: /data/ramon.goncalves/T_CNEFE_ENDERECO2.csv
-  #  output_path: /data/singed/bases/bronze/censo/censo_endereco2_2022_20260505_new.parquet
+  # Dump Censo raw (pipe + aspas). quote vazio: delim não aparece no campo;
+  # campo com aspas/NUL no meio vira NULL, a linha permanece.
+  # - name: censo_especie
+  #   input_path: ~/singed/bases/raw/censo/ESPECIE.csv
+  #   output_path: ~/singed/bases/bronze/censo/especie.parquet
+  #   read_options:
+  #     delim: "|"
+  #     quote: ""
+  #     strip_outer_quotes: true
+  #     encoding: "latin-1"
+  #     header: true
+  # - name: censo_logr
+  #   input_path: ~/singed/bases/raw/censo/LOGR.csv
+  #   output_path: ~/singed/bases/bronze/censo/logr.parquet
+  #   read_options:
+  #     delim: "|"
+  #     quote: ""
+  #     strip_outer_quotes: true
+  #     encoding: "latin-1"
+  #     header: true
+
+  #- name: censo_pessoas_2022
+  #  input_path: /data/ramon.goncalves/T_UPESSCRI.csv
+  #  output_path: /data/singed/bases/bronze/censo/censo_pessoas_2022_20260505.parquet
   #  read_options:
   #    delim: ","
   #    quote: '"'
-  #    escape: "\\"
-  #    encoding: "windows-1252"
+  #    encoding: "utf-8"
   #    header: true
 
   #- name: censo_familia_2022
@@ -35,37 +44,23 @@ datasets:
   #  read_options:
   #    delim: ","
   #    quote: '"'
-  #    escape: "\\"
   #    encoding: "latin-1"
   #    header: true
-  
+
   # - name: cadunico_pessoas_2022
   #  input_path: /data/singed/bases/raw/CadUnico/CadUnico_2022/ARQ_PESSOA_PAB_24122022_V2.TXT
   #  output_path: /data/singed/bases/bronze/cadunico/cadunico_pessoas_2022.parquet
-  #
   #  read_options:
   #    delim: ";"
   #    quote: '"'
-  #    escape: "\\"
   #    encoding: "latin-1"
   #    header: true
-  #- name: cadunico_familia_2022
-  #  input_path: /data/singed/bases/raw/CadUnico/CadUnico_2022/ARQ_FAMILIA_PAB_24122022_V2.TXT
-  #  output_path: /data/singed/bases/bronze/cadunico/cadunico_familia_2022.parquet
-  #
-  #  read_options:
-  #    delim: ";"
-  #    quote: '"'
-  #    escape: "\\"
-  #    encoding: "latin-1"
-  #    header: true
+
   #- name: cpf
-  # input_path: /data/singed/bases/raw/CPF/CPF.csv
-  # output_path: /data/singed/bases/bronze/CPF/cpf.parquet
-  #
-  # read_options:
-  #   delim: ","
-  #   quote: '"'
-  #   escape: "\\"
-  #   encoding: "latin-1"
-  #   header: true
+  #  input_path: /data/singed/bases/raw/CPF/CPF.csv
+  #  output_path: /data/singed/bases/bronze/cpf/cpf.parquet
+  #  read_options:
+  #    delim: ","
+  #    quote: '"'
+  #    encoding: "latin-1"
+  #    header: true

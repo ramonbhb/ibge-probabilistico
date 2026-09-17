@@ -10,6 +10,7 @@ dependencies = [
     "splink==5.0.0.dev1",
     "ipykernel>=6.0.0",
     "matplotlib>=3.8.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]
