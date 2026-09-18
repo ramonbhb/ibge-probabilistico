@@ -230,14 +230,14 @@ CENSO_RAW_DIR = Path(
 CENSO_ESPECIE_ARQUIVO = Path(
     os.environ.get(
         "CENSO_ESPECIE_ARQUIVO",
-        CENSO_RAW_DIR / "ESPECIE.csv",
+        CENSO_DIR / "especie.parquet",
     )
 ).expanduser()
 
 CENSO_LOGR_ARQUIVO = Path(
     os.environ.get(
         "CENSO_LOGR_ARQUIVO",
-        CENSO_RAW_DIR / "LOGR.csv",
+        CENSO_DIR / "logr.parquet",
     )
 ).expanduser()
 
@@ -361,18 +361,18 @@ CENSO_COL_IDADE_MESES = "PECP0030"
 # Alias legado usado no diagnóstico do NB00
 CENSO_COL_IDADE_ANOS = CENSO_COL_IDADE_CALC
 CENSO_COL_UF = "B0001"
-# Chaves de join pessoas ↔ ESPECIE.csv (face) ↔ LOGR.csv (rua)
+# Chaves de join pessoas ↔ ESPECIE (face) ↔ LOGR (rua)
 CENSO_COL_SETOR = "B0000"
 CENSO_COL_QUADRA = "NUM_QUADRA"
 CENSO_COL_FACE = "NUM_FACE"
 
-# ESPECIE.csv: face do setor → segmento de logradouro (CSV |, quote ")
+# ESPECIE: face do setor → segmento de logradouro
 ESPECIE_COL_SETOR = "cod_setor"
 ESPECIE_COL_QUADRA = "num_quadra"
 ESPECIE_COL_FACE = "num_face"
 ESPECIE_COL_SEGLOGR = "cod_seglogr"
 
-# LOGR.csv: segmento → CEP, tipo, título e nome da rua
+# LOGR: segmento → CEP, tipo, título e nome da rua
 LOGR_COL_SETOR = "COD_SETOR"
 LOGR_COL_SEGLOGR = "COD_SEGLOGR"
 LOGR_COL_UF = "COD_UF"
@@ -406,10 +406,10 @@ def digits_lpad_sql(col: str, width: int) -> str:
     )
 
 
-def censo_pipe_csv_sql(path: Path) -> str:
-    """CSV do Censo raw: pipe, aspas, cabeçalho."""
+def censo_parquet_sql(path: Path) -> str:
+    """Parquet bronze (ESPECIE / LOGR)."""
     p = str(Path(path).expanduser()).replace("'", "''")
-    return f"read_csv('{p}', delim='|', quote='\"', header=true)"
+    return f"read_parquet('{p}')"
 
 
 def logradouro_censo_sql(titulo_col: str, nome_col: str) -> str:
@@ -498,8 +498,8 @@ def materialize_censo_logr_lookup(
         clauses.append(_sql_eq_or_in(mun_expr, muns))
     where_clause = " AND ".join(clauses) if clauses else "TRUE"
 
-    especie_sql = censo_pipe_csv_sql(especie)
-    logr_sql = censo_pipe_csv_sql(logr)
+    especie_sql = censo_parquet_sql(especie)
+    logr_sql = censo_parquet_sql(logr)
     tipo_sql = f"COALESCE(TRIM(CAST(l.\"{LOGR_COL_TIPO}\" AS VARCHAR)), '')"
     logr_nome_sql = logradouro_censo_sql(
         f'l."{LOGR_COL_TITULO}"',

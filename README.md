@@ -53,7 +53,7 @@ export DUCKDB_MEMORY_LIMIT=370GB   # Splink/DuckDB
 export THRESHOLD_AVALIACAO=0.99    # avaliação 03, export 04
 ```
 
-Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_RAW_DIR`, `CENSO_CEP_ARQUIVO` (default `~/singed/bases/raw/censo/data_cep_uniq.csv`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `LISTA_OURO_ARQUIVO` (default `~/capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet`), `DUCKDB_TEMP_DIR`.
+Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_ESPECIE_ARQUIVO` / `CENSO_LOGR_ARQUIVO` (default `~/singed/bases/bronze/censo/especie.parquet` e `logr.parquet`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `LISTA_OURO_ARQUIVO` (default `~/capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet`), `DUCKDB_TEMP_DIR`.
 
 ## Notebooks
 
@@ -106,7 +106,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 - Nome: completo, primeiro/meio/último (partículas `DA`, `DOS`, etc. e placeholders `DESCONHECIDO`, `MAE` removidos por [`clean_name_sql`](features.py); vazio → `NULL`). `primeiro_ultimo` e `primeiro_ultimo_phon` nascem no NB00 (`CONCAT_WS` das pontas); não entram no score.
 - **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py)). Sofre o mesmo split da pessoa: `primeiro_nome_mae`, `nome_meio_mae`, `ultimo_nome_mae`, com as fonéticas correspondentes. Vazio vira `NULL` (`NULLIF`), para o Splink não casar `'' = ''`
 - **`cpf_norm`:** no CPF, `COD_CPF` normalizado (11 díg.). No Censo, join com `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`; `MIN` se ambíguo; NULL fora da coorte). Coluna estrutural. Treino: prior + EM. Não entra no score nem nas 12 regras de predição.
-- **CEP Censo:** join `data_cep_uniq.csv` por `B0000` + quadra/face ([`materialize_censo_cep_lookup`](config.py))
+- **CEP Censo:** ESPECIE ⋈ LOGR (parquets) por `B0000` + quadra/face ([`materialize_censo_logr_lookup`](config.py))
 - Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
 - **`idade`:** Censo via `PECP0401` só quando a data validada é nula (se há DOB, o NB00b zera a idade para o Splink não duplicar a comparison); CPF = anos completos em `DATA_REFERENCIA_IDADE` ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo
