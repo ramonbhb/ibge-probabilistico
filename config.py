@@ -337,11 +337,13 @@ CPF_COL_NUM_LOGRADOURO = "NUM_LOGRADOURO"
 CPF_COL_ANO_OBITO = "ANO_OBITO"
 
 # Parquets de nome já fonético. Confira no DESCRIBE do 00; MAE vazio = não entra.
+# cpf_cpf_nome: COD_CPF (chave), cpf_nome (grafia, não entra no join),
+# cpf_nome_fonetico (vira nome_completo_phon).
 CENSO_NOME_COL_ID = "ID_MORADOR"
 CENSO_NOME_COL_PHON = "nome"
 CENSO_NOME_COL_MAE_PHON = ""
 CPF_NOME_COL_CPF = "COD_CPF"
-CPF_NOME_COL_PHON = "nome"
+CPF_NOME_COL_PHON = "cpf_nome_fonetico"
 CPF_NOME_COL_MAE_PHON = ""
 
 CENSO_COL_ID_MORADOR = "ID_MORADOR"
@@ -390,7 +392,9 @@ CENSO_IDADE_MAX = 130
 
 
 def cpf_norm_sql(col: str) -> str:
-    return CPF_NORM_SQL.format(col=col)
+    """11 dígitos. Sem dígito, ou só zero, vira NULL (não vira 00000000000)."""
+    norm = CPF_NORM_SQL.format(col=col)
+    return f"CASE WHEN {norm} = '00000000000' THEN NULL ELSE {norm} END"
 
 
 def setor_norm_sql(col: str) -> str:
