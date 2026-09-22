@@ -92,7 +92,7 @@ def _sql_eq_or_in(expr: str, valores: tuple[str, ...]) -> str:
 # Um eixo por vez (UF *ou* município). Cada um aceita escalar ou lista.
 # Se os dois estiverem preenchidos, a cláusula é AND (como antes).
 # Região Sul: PR 41, SC 42, RS 43. (MA completo seria FILTRO_UF = 21)
-FILTRO_UF: FiltroGeo = [41, 42, 43]
+FILTRO_UF: FiltroGeo = [21]
 FILTRO_MUNICIPIO: FiltroGeo = None
 
 FILTRO_UF = normalize_uf_lista(FILTRO_UF)
@@ -230,14 +230,14 @@ CENSO_RAW_DIR = Path(
 CENSO_ESPECIE_ARQUIVO = Path(
     os.environ.get(
         "CENSO_ESPECIE_ARQUIVO",
-        CENSO_DIR / "especie.parquet",
+        CENSO_DIR / "censo_especie.parquet",
     )
 ).expanduser()
 
 CENSO_LOGR_ARQUIVO = Path(
     os.environ.get(
         "CENSO_LOGR_ARQUIVO",
-        CENSO_DIR / "logr.parquet",
+        CENSO_DIR / "censo_logr.parquet",
     )
 ).expanduser()
 
@@ -281,7 +281,7 @@ LISTA_OURO_ARQUIVO = Path(
     os.environ.get(
         "LISTA_OURO_ARQUIVO",
         Path.home()
-        / "capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet",
+        / "capefe/scripts_luis/Pareamento Determinístico/V4 20260827/regra1.parquet",
     )
 ).expanduser()
 
