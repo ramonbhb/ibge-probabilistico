@@ -51,3 +51,32 @@ def test_stamp_censo_lista_ouro_com_min(tmp_path: Path) -> None:
     assert rows["censo_A"] == "00000000001"
     assert rows["censo_B"] == "00000000002"  # MIN(2, 3)
     assert rows["censo_C"] is None
+
+
+def test_stamp_censo_lista_ouro_colunas_novas(tmp_path: Path) -> None:
+    con = duckdb.connect()
+    path = tmp_path / "lista.parquet"
+    con.execute(f"""
+    COPY (
+        SELECT * FROM (VALUES
+            ('A', '00721287042'),
+            ('B', '11144477735')
+        ) v("PERSON_ID_CENSO", "CPF_NORM")
+    ) TO '{path}' (FORMAT PARQUET)
+    """)
+    con.execute(
+        """
+        CREATE TABLE censo AS SELECT * FROM (VALUES
+            ('censo_A', 'A', CAST(NULL AS VARCHAR))
+        ) v(unique_id, person_id_censo, cpf_norm)
+        """
+    )
+    stats = materialize_cohort_cpf_por_censo(con, cohort_parquet=path)
+    n = stamp_censo_cpf_from_cohort(con, table="censo")
+    cpf = con.execute(
+        "SELECT cpf_norm FROM censo WHERE unique_id = 'censo_A'"
+    ).fetchone()[0]
+    con.close()
+    assert stats["n_censo_com_cpf_coorte"] == 2
+    assert n == 1
+    assert cpf == "00721287042"

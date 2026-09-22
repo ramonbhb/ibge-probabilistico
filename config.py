@@ -916,6 +916,31 @@ def _load_cohort_table(
         """)
 
 
+def lista_ouro_colunas(columns: set[str]) -> tuple[str, str]:
+    """Id do Censo e CPF na lista de ouro, já entre aspas.
+
+    Arquivo atual: PERSON_ID_CENSO + CPF_NORM.
+    Legado: ID_MORADOR + cpf_cpf.
+    """
+    if "PERSON_ID_CENSO" in columns:
+        id_col = '"PERSON_ID_CENSO"'
+    elif "ID_MORADOR" in columns:
+        id_col = '"ID_MORADOR"'
+    else:
+        raise KeyError(
+            f"Lista de ouro sem id do Censo. Colunas: {sorted(columns)}."
+        )
+    if "CPF_NORM" in columns:
+        cpf_col = '"CPF_NORM"'
+    elif "cpf_cpf" in columns:
+        cpf_col = '"cpf_cpf"'
+    elif "CPF_ORIGINAL" in columns:
+        cpf_col = '"CPF_ORIGINAL"'
+    else:
+        raise KeyError(f"Lista de ouro sem CPF. Colunas: {sorted(columns)}.")
+    return id_col, cpf_col
+
+
 def materialize_cohort_cpf_por_censo(
     con: duckdb.DuckDBPyConnection,
     *,
@@ -925,12 +950,13 @@ def materialize_cohort_cpf_por_censo(
 ) -> dict[str, int]:
     """Um `cpf_norm` por `person_id_censo` a partir da lista de ouro (MIN se ambíguo).
 
-    Carimba o Censo no NB00/00b com `ID_MORADOR` + `cpf_cpf` de
-    LISTA_OURO_ARQUIVO. Não é blocking de predição.
+    Não é blocking de predição.
     """
     _load_cohort_table(con, cohort_parquet=cohort_parquet, cohort_table=cohort_table)
-    cpf_gt = cpf_norm_sql('"cpf_cpf"')
-    pid = 'CAST("ID_MORADOR" AS VARCHAR)'
+    cols = {r[0] for r in con.execute(f"DESCRIBE {cohort_table}").fetchall()}
+    id_col, cpf_col = lista_ouro_colunas(cols)
+    cpf_gt = cpf_norm_sql(cpf_col)
+    pid = f"CAST({id_col} AS VARCHAR)"
     con.execute(f"""
     CREATE OR REPLACE TABLE {out_table} AS
     SELECT
@@ -938,7 +964,7 @@ def materialize_cohort_cpf_por_censo(
         MIN({cpf_gt}) AS cpf_norm,
         COUNT(DISTINCT {cpf_gt}) AS n_cpf_distintos
     FROM {cohort_table}
-    WHERE "ID_MORADOR" IS NOT NULL AND "cpf_cpf" IS NOT NULL
+    WHERE {id_col} IS NOT NULL AND {cpf_col} IS NOT NULL
     GROUP BY {pid}
     """)
     n_dup = con.execute(f"""
