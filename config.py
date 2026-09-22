@@ -281,7 +281,7 @@ LISTA_OURO_ARQUIVO = Path(
     os.environ.get(
         "LISTA_OURO_ARQUIVO",
         Path.home()
-        / "capefe/scripts_luis/Pareamento Determinístico/V4 20260827/regra1.parquet",
+        / "capefe/scripts_luis/Pareamento Determinístico/V4 20260827/regra1_2.parquet",
     )
 ).expanduser()
 
@@ -340,7 +340,7 @@ CPF_COL_ANO_OBITO = "ANO_OBITO"
 # cpf_cpf_nome: COD_CPF (chave), cpf_nome (grafia, não entra no join),
 # cpf_nome_fonetico (vira nome_completo_phon).
 CENSO_NOME_COL_ID = "ID_MORADOR"
-CENSO_NOME_COL_PHON = "nome"
+CENSO_NOME_COL_PHON = "pes_nome_fonetico"
 CENSO_NOME_COL_MAE_PHON = ""
 CPF_NOME_COL_CPF = "COD_CPF"
 CPF_NOME_COL_PHON = "cpf_nome_fonetico"
