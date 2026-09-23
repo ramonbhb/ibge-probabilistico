@@ -221,7 +221,7 @@ SPLINK_ATRIBUICAO: Path
 SPLINK_ATRIBUICAO_REGRAS: Path
 
 CENSO_DIR = Path(
-    os.environ.get("CENSO_DIR", Path.home() / "singed/bases/bronze/censo")
+    os.environ.get("CENSO_DIR", Path.home() / "singed/bases/bronze/censo/2022")
 ).expanduser()
 
 CENSO_RAW_DIR = Path(
@@ -259,7 +259,7 @@ CENSO_LOGR_ARQUIVO = Path(
 CENSO_PESSOAS_ARQUIVO = Path(
     os.environ.get(
         "CENSO_PESSOAS_ARQUIVO",
-        CENSO_DIR / "censo_pessoas_2022_20260505.parquet",
+        CENSO_DIR / "censo_pessoas_2022.parquet",
     )
 ).expanduser()
 

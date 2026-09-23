@@ -53,7 +53,7 @@ export DUCKDB_MEMORY_LIMIT=370GB   # Splink/DuckDB
 export THRESHOLD_AVALIACAO=0.99    # avaliação 03, export 04
 ```
 
-Também aceitam override por ambiente: `CENSO_DIR`, `CENSO_ESPECIE_ARQUIVO` / `CENSO_ENDERECO_ARQUIVO` / `CENSO_FACE_ARQUIVO` / `CENSO_LOGR_ARQUIVO` (default `~/singed/bases/bronze/censo/censo_especie.parquet`, `censo_endereco.parquet`, `censo_face.parquet`, `censo_logr.parquet`), `CENSO_PESSOAS_ARQUIVO`, `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `LISTA_OURO_ARQUIVO` (default `~/capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet`), `DUCKDB_TEMP_DIR`.
+Também aceitam override por ambiente: `CENSO_DIR` (default `~/singed/bases/bronze/censo/2022`), `CENSO_ESPECIE_ARQUIVO` / `CENSO_ENDERECO_ARQUIVO` / `CENSO_FACE_ARQUIVO` / `CENSO_LOGR_ARQUIVO` / `CENSO_PESSOAS_ARQUIVO` (`censo_pessoas_2022.parquet`), `CPF_ARQUIVO`, `COHORT_DIR`, `COHORT_DEDUP_ARQUIVO`, `LISTA_OURO_ARQUIVO` (default `~/capefe/scripts_luis/Pareamento/V4 20260827/regra1.parquet`), `DUCKDB_TEMP_DIR`.
 
 ## Notebooks
 
