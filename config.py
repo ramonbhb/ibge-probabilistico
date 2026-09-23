@@ -197,7 +197,8 @@ def set_filtros(
 # =============================================================================
 #
 # OUTPUT_DIR_BASE, OUTPUT_DIR (subdir do recorte), CENSO_DIR, CENSO_RAW_DIR,
-# CENSO_ESPECIE_ARQUIVO, CENSO_LOGR_ARQUIVO, CENSO_PESSOAS_ARQUIVO,
+# CENSO_ESPECIE_ARQUIVO, CENSO_ENDERECO_ARQUIVO, CENSO_FACE_ARQUIVO,
+# CENSO_LOGR_ARQUIVO, CENSO_PESSOAS_ARQUIVO,
 # CENSO_PES_NOME_ARQUIVO, CPF_ARQUIVO, CPF_CPF_NOME_ARQUIVO,
 # COHORT_DIR, COHORT_DEDUP_ARQUIVO, LISTA_OURO_ARQUIVO, DUCKDB_TEMP_DIR,
 # DUCKDB_THREADS, DUCKDB_MEMORY_LIMIT
@@ -231,6 +232,20 @@ CENSO_ESPECIE_ARQUIVO = Path(
     os.environ.get(
         "CENSO_ESPECIE_ARQUIVO",
         CENSO_DIR / "censo_especie.parquet",
+    )
+).expanduser()
+
+CENSO_ENDERECO_ARQUIVO = Path(
+    os.environ.get(
+        "CENSO_ENDERECO_ARQUIVO",
+        CENSO_DIR / "censo_endereco.parquet",
+    )
+).expanduser()
+
+CENSO_FACE_ARQUIVO = Path(
+    os.environ.get(
+        "CENSO_FACE_ARQUIVO",
+        CENSO_DIR / "censo_face.parquet",
     )
 ).expanduser()
 
@@ -363,16 +378,31 @@ CENSO_COL_IDADE_MESES = "PECP0030"
 # Alias legado usado no diagnóstico do NB00
 CENSO_COL_IDADE_ANOS = CENSO_COL_IDADE_CALC
 CENSO_COL_UF = "B0001"
-# Chaves de join pessoas ↔ ESPECIE (face) ↔ LOGR (rua)
+# Chaves de join pessoas ↔ espécie ↔ endereço ↔ face ↔ LOGR
 CENSO_COL_SETOR = "B0000"
 CENSO_COL_QUADRA = "NUM_QUADRA"
 CENSO_COL_FACE = "NUM_FACE"
+CENSO_COL_ENDERECO = "B0006"
+CENSO_COL_SEQ_ESPECIE = "COD_SEQ_ESPECIE"
 
-# ESPECIE: face do setor → segmento de logradouro
+# ESPECIE: pessoa → imóvel (não usar cod_seglogr daqui)
 ESPECIE_COL_SETOR = "cod_setor"
 ESPECIE_COL_QUADRA = "num_quadra"
 ESPECIE_COL_FACE = "num_face"
-ESPECIE_COL_SEGLOGR = "cod_seglogr"
+ESPECIE_COL_ENDERECO = "cod_endereco"
+ESPECIE_COL_SEQ = "seq_especie"
+
+# ENDERECO: confirma o imóvel na malha CNEFE
+ENDERECO_COL_SETOR = "cod_setor"
+ENDERECO_COL_QUADRA = "num_quadra"
+ENDERECO_COL_FACE = "num_face"
+ENDERECO_COL_ENDERECO = "cod_endereco"
+
+# FACE: lado de quadra → segmento de logradouro
+FACE_COL_SETOR = "cod_setor"
+FACE_COL_QUADRA = "num_quadra"
+FACE_COL_FACE = "num_face"
+FACE_COL_SEGLOGR = "cod_seglogr"
 
 # LOGR: segmento → CEP, tipo, título e nome da rua
 LOGR_COL_SETOR = "COD_SETOR"
@@ -411,7 +441,7 @@ def digits_lpad_sql(col: str, width: int) -> str:
 
 
 def censo_parquet_sql(path: Path) -> str:
-    """Parquet bronze (ESPECIE / LOGR)."""
+    """Parquet bronze CNEFE (espécie / endereço / face / logr)."""
     p = str(Path(path).expanduser()).replace("'", "''")
     return f"read_parquet('{p}')"
 
@@ -461,27 +491,33 @@ def censo_municipio_expr(alias: str = "p") -> str:
 
 
 def censo_cep_join_on(p_alias: str = "p", cep_alias: str = "k") -> str:
-    """ON pessoas ↔ censo_logr_lookup (setor 15 díg. + quadra/face 3 díg.)."""
+    """ON pessoas ↔ censo_logr_lookup (imóvel: setor + quadra + face + B0006 + seq)."""
     return f"""{setor_norm_sql(f'{p_alias}.{CENSO_COL_SETOR}')} = {cep_alias}.cod_setor_norm
         AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_QUADRA}', 3)} = {cep_alias}.num_quadra
-        AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_FACE}', 3)} = {cep_alias}.num_face"""
+        AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_FACE}', 3)} = {cep_alias}.num_face
+        AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_ENDERECO}', 6)} = {cep_alias}.cod_endereco
+        AND {digits_lpad_sql(f'{p_alias}.{CENSO_COL_SEQ_ESPECIE}', 3)} = {cep_alias}.seq_especie"""
 
 
 def materialize_censo_logr_lookup(
     con: duckdb.DuckDBPyConnection,
     *,
     especie_path: Path | None = None,
+    endereco_path: Path | None = None,
+    face_path: Path | None = None,
     logr_path: Path | None = None,
     target_table: str = "censo_logr_lookup",
     filtro_uf: FiltroGeo | Any = _UNSET,
     filtro_municipio: FiltroGeo | Any = _UNSET,
 ) -> None:
-    """Face (ESPECIE) ⋈ rua (LOGR) → uma linha por setor+quadra+face.
+    """Espécie ⋈ endereço ⋈ face ⋈ LOGR → uma linha por imóvel.
 
-    Filtro UF/município entra no LOGR (`COD_UF` / `COD_MUNICIPIO`). Se a face
-    aparecer mais de uma vez, imprime n vs n_chaves e avisa.
+    `cod_seglogr` vem da face, não da espécie. CEP/tipo/nome saem do LOGR.
+    Filtro UF/município entra no LOGR (`COD_UF` / `COD_MUNICIPIO`).
     """
     especie = (especie_path or CENSO_ESPECIE_ARQUIVO).expanduser()
+    endereco = (endereco_path or CENSO_ENDERECO_ARQUIVO).expanduser()
+    face = (face_path or CENSO_FACE_ARQUIVO).expanduser()
     logr = (logr_path or CENSO_LOGR_ARQUIVO).expanduser()
     clauses: list[str] = []
     ufs = normalize_uf_lista(FILTRO_UF if filtro_uf is _UNSET else filtro_uf)
@@ -503,6 +539,8 @@ def materialize_censo_logr_lookup(
     where_clause = " AND ".join(clauses) if clauses else "TRUE"
 
     especie_sql = censo_parquet_sql(especie)
+    endereco_sql = censo_parquet_sql(endereco)
+    face_sql = censo_parquet_sql(face)
     logr_sql = censo_parquet_sql(logr)
     tipo_sql = f"COALESCE(TRIM(CAST(l.\"{LOGR_COL_TIPO}\" AS VARCHAR)), '')"
     logr_nome_sql = logradouro_censo_sql(
@@ -515,8 +553,25 @@ def materialize_censo_logr_lookup(
             {setor_norm_sql(f'e."{ESPECIE_COL_SETOR}"')} AS cod_setor_norm,
             {digits_lpad_sql(f'e."{ESPECIE_COL_QUADRA}"', 3)} AS num_quadra,
             {digits_lpad_sql(f'e."{ESPECIE_COL_FACE}"', 3)} AS num_face,
-            {digits_lpad_sql(f'e."{ESPECIE_COL_SEGLOGR}"', 7)} AS cod_seglogr
+            {digits_lpad_sql(f'e."{ESPECIE_COL_ENDERECO}"', 6)} AS cod_endereco,
+            {digits_lpad_sql(f'e."{ESPECIE_COL_SEQ}"', 3)} AS seq_especie
         FROM {especie_sql} e
+    ),
+    endereco AS (
+        SELECT
+            {setor_norm_sql(f's."{ENDERECO_COL_SETOR}"')} AS cod_setor_norm,
+            {digits_lpad_sql(f's."{ENDERECO_COL_QUADRA}"', 3)} AS num_quadra,
+            {digits_lpad_sql(f's."{ENDERECO_COL_FACE}"', 3)} AS num_face,
+            {digits_lpad_sql(f's."{ENDERECO_COL_ENDERECO}"', 6)} AS cod_endereco
+        FROM {endereco_sql} s
+    ),
+    face AS (
+        SELECT
+            {setor_norm_sql(f'f."{FACE_COL_SETOR}"')} AS cod_setor_norm,
+            {digits_lpad_sql(f'f."{FACE_COL_QUADRA}"', 3)} AS num_quadra,
+            {digits_lpad_sql(f'f."{FACE_COL_FACE}"', 3)} AS num_face,
+            {digits_lpad_sql(f'f."{FACE_COL_SEGLOGR}"', 7)} AS cod_seglogr
+        FROM {face_sql} f
     ),
     logr AS (
         SELECT
@@ -532,25 +587,42 @@ def materialize_censo_logr_lookup(
         e.cod_setor_norm,
         e.num_quadra,
         e.num_face,
+        e.cod_endereco,
+        e.seq_especie,
         l.cep,
         l.tipo_logradouro,
         l.logradouro
     FROM especie e
+    INNER JOIN endereco s
+        ON e.cod_setor_norm = s.cod_setor_norm
+       AND e.num_quadra = s.num_quadra
+       AND e.num_face = s.num_face
+       AND e.cod_endereco = s.cod_endereco
+    INNER JOIN face f
+        ON s.cod_setor_norm = f.cod_setor_norm
+       AND s.num_quadra = f.num_quadra
+       AND s.num_face = f.num_face
     INNER JOIN logr l
-        ON e.cod_setor_norm = l.cod_setor_norm
-       AND e.cod_seglogr = l.cod_seglogr
+        ON f.cod_setor_norm = l.cod_setor_norm
+       AND f.cod_seglogr = l.cod_seglogr
     """
+    chave = (
+        "cod_setor_norm, num_quadra, num_face, cod_endereco, seq_especie"
+    )
     n, n_keys = con.execute(f"""
     SELECT
         COUNT(*) AS n,
-        COUNT(DISTINCT (cod_setor_norm, num_quadra, num_face)) AS n_chaves
+        COUNT(DISTINCT ({chave})) AS n_chaves
     FROM ({join_sql})
     """).fetchone()
-    print(f"censo_logr_lookup: {n:,} linhas ESPECIE⋈LOGR, {n_keys:,} faces distintas")
+    print(
+        f"censo_logr_lookup: {n:,} linhas espécie⋈endereço⋈face⋈LOGR, "
+        f"{n_keys:,} imóveis distintos"
+    )
     if n != n_keys:
         print(
-            "AVISO: face com mais de um segmento/rua; o lookup fica com "
-            "MIN(cep / tipo / logradouro) por setor+quadra+face."
+            "AVISO: imóvel com mais de uma rua; o lookup fica com "
+            "MIN(cep / tipo / logradouro) por setor+quadra+face+endereço+seq."
         )
 
     con.execute(f"""
@@ -559,11 +631,13 @@ def materialize_censo_logr_lookup(
         cod_setor_norm,
         num_quadra,
         num_face,
+        cod_endereco,
+        seq_especie,
         MIN(cep) AS cep,
         MIN(tipo_logradouro) AS tipo_logradouro,
         MIN(logradouro) AS logradouro
     FROM ({join_sql})
-    GROUP BY 1, 2, 3
+    GROUP BY 1, 2, 3, 4, 5
     """)
 
 
@@ -1029,9 +1103,12 @@ def materialize_censo_registros(
         ).items()
     }
     sexo_n = normalize_sexo_sql("sexo_raw")
-    logr = ""
-    if "tipo_logradouro" in cols:
-        logr = ", tipo_logradouro, logradouro, numero_logradouro"
+    logr_cols = [
+        c
+        for c in ("tipo_logradouro", "logradouro", "numero_logradouro")
+        if c in cols
+    ]
+    logr = (", " + ", ".join(logr_cols)) if logr_cols else ""
     con.execute(f"""
     CREATE OR REPLACE TABLE {out_table} AS
     WITH norm AS (
@@ -1283,6 +1360,8 @@ def print_paths() -> None:
     print("CENSO_PES_NOME_ARQUIVO:", CENSO_PES_NOME_ARQUIVO)
     print("CPF_CPF_NOME_ARQUIVO:", CPF_CPF_NOME_ARQUIVO)
     print("CENSO_ESPECIE_ARQUIVO:", CENSO_ESPECIE_ARQUIVO)
+    print("CENSO_ENDERECO_ARQUIVO:", CENSO_ENDERECO_ARQUIVO)
+    print("CENSO_FACE_ARQUIVO:", CENSO_FACE_ARQUIVO)
     print("CENSO_LOGR_ARQUIVO:", CENSO_LOGR_ARQUIVO)
     print("COHORT_DEDUP_ARQUIVO:", COHORT_DEDUP_ARQUIVO)
     print("LISTA_OURO_ARQUIVO:", LISTA_OURO_ARQUIVO)

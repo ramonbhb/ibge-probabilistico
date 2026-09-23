@@ -89,3 +89,44 @@ def test_sem_phon_no_staging_falha() -> None:
     with pytest.raises(RuntimeError, match="nome_completo_phon"):
         materialize_censo_registros(con)
     con.close()
+
+
+def test_registros_copia_logr_sem_numero() -> None:
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE censo_staging (
+            person_id_censo VARCHAR,
+            id_domicilio VARCHAR,
+            nome_completo_raw VARCHAR,
+            nome_mae_inferido VARCHAR,
+            data_nascimento VARCHAR,
+            sexo_raw VARCHAR,
+            idade INTEGER,
+            cep VARCHAR,
+            tipo_logradouro VARCHAR,
+            logradouro VARCHAR,
+            uf VARCHAR,
+            cod_municipio VARCHAR,
+            nome_completo_phon VARCHAR
+        )
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO censo_staging VALUES
+        ('1', 'd1', 'Ana Silva', 'Maria', '1990-01-02',
+         '2', 32, '65000000', 'RUA', 'GRANDE', '21', '2111300', 'ANA SILVA')
+        """
+    )
+    materialize_censo_registros(con)
+    row = con.execute(
+        """
+        SELECT tipo_logradouro, logradouro
+        FROM censo_registros
+        """
+    ).fetchone()
+    cols = {r[0] for r in con.execute("DESCRIBE censo_registros").fetchall()}
+    con.close()
+    assert row == ("RUA", "GRANDE")
+    assert "numero_logradouro" not in cols
