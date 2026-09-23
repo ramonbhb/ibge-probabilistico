@@ -80,7 +80,7 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** reusa o bronze, refaz o filtro UF/município **e reconstrói** `censo_registros` / `cpf_registros` (o 00b não lê `*_filtrado`).
 
-**Blocking Splink:** três listas distintas — predição (12 regras OR, recall) no [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb); prior (`nome_completo+DOB` e `cpf_norm`) e EM (quatro blocos apertados para `m`) no [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). Não unificar. Fonte das 12 regras: célula `blocking_rules` do 02b. `cpf_norm` e `nome_meio` **não** entram na predição. Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sexo em `ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+sexo+cep`, `DOB+sexo+cep` e na 12ª. CEP nas três de CEP; município nas duas de primeiro nome.
+**Blocking Splink:** três listas distintas — predição (12 regras OR, recall) no [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb); prior (`nome_completo+DOB` e `cpf_norm`) e EM (quatro blocos apertados para `m`) no [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). Não unificar. Fonte das 12 regras: célula `blocking_rules` do 02b. `cpf_norm` e `nome_meio` **não** entram na predição. Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sexo em `ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+sexo+cep`, `logradouro_norm+cep+ano+sexo` e na 12ª. CEP nas três regras com CEP; município nas duas de primeiro nome.
 
 - `nome_completo_phon`
 - `primeiro_nome_phon` + `ultimo_nome_phon` + `ano_nascimento`
@@ -92,7 +92,7 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 - `primeiro_nome_phon` + `mes_nascimento` + `ano_nascimento` + `cod_municipio`
 - `ultimo_nome_phon` + `mes_nascimento` + `dia_nascimento` + `sexo` + `cep`
 - `ultimo_nome_phon` + `mes_nascimento` + `ano_nascimento` + `sexo` + `cep`
-- `data_nascimento` + `sexo` + `cep`
+- `logradouro_norm` + `cep` + `ano_nascimento` + `sexo`
 - `ultimo_nome_phon` + `ano_nascimento` + `mes_nascimento` + `sexo` + primeiro DL proporcional (`len >= 6` e `dl * 6 <= min(len)`)
 
 Profile e gráfico cumulativo de pares candidatos rodam **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
@@ -106,7 +106,7 @@ Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência
 - Nome: completo, primeiro/meio/último (partículas `DA`, `DOS`, etc. e placeholders `DESCONHECIDO`, `MAE` removidos por [`clean_name_sql`](features.py); vazio → `NULL`). `primeiro_ultimo` e `primeiro_ultimo_phon` nascem no NB00 (`CONCAT_WS` das pontas); não entram no score.
 - **`nome_mae`:** CPF direto (`NOM_MAE`); Censo **inferido** por domicílio ([`inferir_pais.py`](inferir_pais.py)). Sofre o mesmo split da pessoa: `primeiro_nome_mae`, `nome_meio_mae`, `ultimo_nome_mae`, com as fonéticas correspondentes. Vazio vira `NULL` (`NULLIF`), para o Splink não casar `'' = ''`
 - **`cpf_norm`:** no CPF, `COD_CPF` normalizado (11 díg.). No Censo, join com `cohort_dedup` (`PERSON_ID_CENSO` → `CPF_NORM`; `MIN` se ambíguo; NULL fora da coorte). Coluna estrutural. Treino: prior + EM. Não entra no score nem nas 12 regras de predição.
-- **CEP e logradouro Censo:** espécie ⋈ endereço ⋈ face ⋈ LOGR (parquets) por `B0000` + quadra/face + `B0006` + `COD_SEQ_ESPECIE`; `cod_seglogr` vem da face ([`materialize_censo_logr_lookup`](config.py))
+- **CEP e logradouro Censo:** espécie ⋈ endereço ⋈ face ⋈ LOGR na seção 5 do NB00, por `B0000` + quadra/face + `B0006` + `COD_SEQ_ESPECIE`; `cod_seglogr` vem da face. `logradouro_norm` (nome sem tipo) entra no Censo e no CPF para o blocking
 - Sexo, DOB, **idade**, CEP, **UF**, **`cod_municipio`** (IBGE 7 díg.)
 - **`ano_obito`:** só CPF, `NULL` no Censo. Não entra em comparação — existe para o filtro do NB00b e para auditoria
 - **`idade`:** Censo via `PECP0401` só quando a data validada é nula (se há DOB, o NB00b zera a idade para o Splink não duplicar a comparison); CPF = anos completos em `DATA_REFERENCIA_IDADE` ([`idade_censo_sql`](config.py), [`idade_cpf_sql`](config.py)). Ver abaixo

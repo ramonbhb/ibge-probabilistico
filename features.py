@@ -295,6 +295,47 @@ def normalize_cep(cep) -> str:
 #   - _dedupe_consecutive vira list_reduce sobre a lista de caracteres
 
 
+_TIPOS_LOGRADOURO = (
+    "AVENIDA",
+    "ALAMEDA",
+    "TRAVESSA",
+    "RODOVIA",
+    "ESTRADA",
+    "SERVIDAO",
+    "LOTEAMENTO",
+    "CONJUNTO",
+    "CAMINHO",
+    "ACESSO",
+    "VIELA",
+    "LARGO",
+    "PRACA",
+    "QUADRA",
+    "BECO",
+    "VIA",
+    "RUA",
+    "EST",
+    "ROD",
+    "AV",
+    "AL",
+    "TV",
+    "PC",
+    "R",
+)
+
+
+def logradouro_norm_sql(nome_col: str) -> str:
+    """Nome da rua para blocking: maiúsculas, sem acento, sem tipo no início.
+
+    DA/DE ficam. `RUA GRANDE` e `GRANDE` viram `GRANDE`; `R DA PAZ` vira `DA PAZ`.
+    Vazio vira NULL.
+    """
+    norm = normalize_text_sql(nome_col)
+    tipos = "|".join(_TIPOS_LOGRADOURO)
+    sem_tipo = f"regexp_replace(trim({norm}), '^({tipos}) ', '')"
+    sem_tipo = f"regexp_replace(trim({sem_tipo}), '^({tipos}) ', '')"
+    return f"NULLIF(trim({sem_tipo}), '')"
+
+
 def normalize_text_sql(col: str) -> str:
     """normalize_text() em SQL: maiúsculas, sem acento, só A-Z0-9 e espaço simples."""
     texto = f"trim(upper(CAST({col} AS VARCHAR)))"

@@ -101,7 +101,8 @@ def test_onze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
         "sexo",
         "cep",
     ) in blocking_cols
-    assert ("data_nascimento", "sexo", "cep") in blocking_cols
+    assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") in blocking_cols
+    assert ("data_nascimento", "sexo", "cep") not in blocking_cols
     assert ("data_nascimento", "cep") not in blocking_cols
     assert ("data_nascimento", "uf", "sexo", "cep") not in blocking_cols
 
@@ -135,7 +136,7 @@ def test_meio_fora_do_blocking_de_predicao(
 
 def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None:
     com_sexo = [cols for cols in blocking_cols if "sexo" in cols]
-    assert ("data_nascimento", "sexo", "cep") in com_sexo
+    assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") in com_sexo
     assert (
         "ultimo_nome_phon",
         "mes_nascimento",
