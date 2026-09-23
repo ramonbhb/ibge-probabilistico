@@ -261,10 +261,14 @@ def test_02_nome_completo_token_aware() -> None:
     assert "jw_ultimo_095_sql" in src
     assert "NameComparison(\n        'nome_completo_phon'" not in src
     assert "NameComparison(\n        'primeiro_nome_phon'" not in src
-    assert "NameComparison(\n        'ultimo_nome_phon'" in src
+    assert "NameComparison" not in src
     assert "damerau_levenshtein" in src
     assert "dl_completo_1_sql" in src
-    assert "dl_primeiro_1_sql" in src
+    assert "dl_completo_2_sql" in src
+    assert "dl_token_1_sql" in src
+    assert "comparison_token('primeiro_nome_phon')" in src
+    assert "comparison_token('ultimo_nome_phon')" in src
+    assert "dl_primeiro_2_sql" not in src
     assert "primeiro_nome_phon" in src
     jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
     assert jw95.find("[-1]") < jw95.find("jaro_winkler_similarity")
@@ -314,3 +318,20 @@ def test_primeiro_nome_json_damerau(model: dict) -> None:
             "retreinar notebooks/02_treinar_splink.ipynb"
         )
     assert "* 6" in sqls or " * 6 " in sqls
+    assert "<= 2" not in sqls
+
+
+def test_ultimo_nome_json_igual_ao_primeiro(model: dict) -> None:
+    ultimo = next(
+        c
+        for c in model["comparisons"]
+        if c["output_column_name"] == "ultimo_nome_phon"
+    )
+    sqls = " ".join(lvl.get("sql_condition", "") for lvl in ultimo["comparison_levels"])
+    if "damerau_levenshtein" not in sqls:
+        pytest.skip(
+            "JSON antigo sem DL no último nome — "
+            "retreinar notebooks/02_treinar_splink.ipynb"
+        )
+    assert "* 6" in sqls or " * 6 " in sqls
+    assert "<= 2" not in sqls
