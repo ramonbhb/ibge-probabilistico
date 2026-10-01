@@ -1,4 +1,4 @@
-"""Contrato do JSON (02) e das 12 regras de predição (02b)."""
+"""Contrato do JSON (02) e das 13 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -49,14 +49,15 @@ def model() -> dict:
         data = json.load(f)
     comparison_names = [c["output_column_name"] for c in data.get("comparisons", [])]
     if (
-        "primeiro_nome_phon" not in comparison_names
-        or "ultimo_nome_phon" not in comparison_names
+        "nome_completo_phon" not in comparison_names
+        or "primeiro_nome_phon" in comparison_names
+        or "ultimo_nome_phon" in comparison_names
         or "nome_meio_phon" in comparison_names
         or "sexo" in comparison_names
     ):
         pytest.skip(
             f"{path} ainda é um JSON antigo "
-            "(score fora do spec: completo + primeiro + último, sem meio/sexo). "
+            "(score fora do spec: só nome completo, sem primeiro/último/meio/sexo). "
             "Retreinar notebooks/02_treinar_splink.ipynb."
         )
     return data
@@ -72,8 +73,8 @@ def comparison_names(model: dict) -> list[str]:
     return [c["output_column_name"] for c in model["comparisons"]]
 
 
-def test_onze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
-    assert len(blocking_cols) == 11
+def test_doze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
+    assert len(blocking_cols) == 12
     assert blocking_cols[0] == ("nome_completo_phon",)
     assert (
         "primeiro_nome_phon",
@@ -102,6 +103,7 @@ def test_onze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
         "cep",
     ) in blocking_cols
     assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") in blocking_cols
+    assert ("nome_mae_phon", "data_nascimento") in blocking_cols
     assert ("data_nascimento", "sexo", "cep") not in blocking_cols
     assert ("data_nascimento", "cep") not in blocking_cols
     assert ("data_nascimento", "uf", "sexo", "cep") not in blocking_cols
@@ -109,7 +111,8 @@ def test_onze_regras_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
 
 def test_doze_regra_dl_sql() -> None:
     src = _blocking_src_02b()
-    assert src.count("block_on(") == 11
+    assert src.count("block_on(") == 12
+    assert "nome_mae_phon" in src
     assert "damerau_levenshtein" in src
     assert "l.primeiro_nome_phon" in src
     assert "l.sexo = r.sexo" in src
@@ -166,12 +169,12 @@ def test_comparisons_sem_cpf_sexo_cep(comparison_names: list[str]) -> None:
     assert "cep" not in blob
 
 
-def test_comparisons_completo_primeiro_ultimo_sem_composto_sem_meio_sem_mae(
+def test_comparisons_so_completo_sem_token_sem_meio_sem_mae(
     comparison_names: list[str],
 ) -> None:
     assert "nome_completo_phon" in comparison_names
-    assert "primeiro_nome_phon" in comparison_names
-    assert "ultimo_nome_phon" in comparison_names
+    assert "primeiro_nome_phon" not in comparison_names
+    assert "ultimo_nome_phon" not in comparison_names
     assert "primeiro_ultimo_phon" not in comparison_names
     assert "nome_meio_phon" not in comparison_names
     assert "primeiro_ultimo" not in comparison_names
@@ -265,11 +268,11 @@ def test_02_nome_completo_token_aware() -> None:
     assert "damerau_levenshtein" in src
     assert "dl_completo_1_sql" in src
     assert "dl_completo_2_sql" in src
-    assert "dl_token_1_sql" in src
-    assert "comparison_token('primeiro_nome_phon')" in src
-    assert "comparison_token('ultimo_nome_phon')" in src
+    assert "dl_token_1_sql" not in src
+    assert "comparison_token" not in src
     assert "dl_primeiro_2_sql" not in src
-    assert "primeiro_nome_phon" in src
+    assert "primeiro_nome_phon" not in src
+    assert "ultimo_nome_phon" not in src
     jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
     assert jw95.find("[-1]") < jw95.find("jaro_winkler_similarity")
 
@@ -303,35 +306,3 @@ def test_nome_completo_json_damerau(model: dict) -> None:
         )
     assert "<= 1" in sqls
     assert "<= 2" in sqls
-
-
-def test_primeiro_nome_json_damerau(model: dict) -> None:
-    primeiro = next(
-        c
-        for c in model["comparisons"]
-        if c["output_column_name"] == "primeiro_nome_phon"
-    )
-    sqls = " ".join(lvl.get("sql_condition", "") for lvl in primeiro["comparison_levels"])
-    if "damerau_levenshtein" not in sqls:
-        pytest.skip(
-            "JSON antigo sem DL no primeiro nome — "
-            "retreinar notebooks/02_treinar_splink.ipynb"
-        )
-    assert "* 6" in sqls or " * 6 " in sqls
-    assert "<= 2" not in sqls
-
-
-def test_ultimo_nome_json_igual_ao_primeiro(model: dict) -> None:
-    ultimo = next(
-        c
-        for c in model["comparisons"]
-        if c["output_column_name"] == "ultimo_nome_phon"
-    )
-    sqls = " ".join(lvl.get("sql_condition", "") for lvl in ultimo["comparison_levels"])
-    if "damerau_levenshtein" not in sqls:
-        pytest.skip(
-            "JSON antigo sem DL no último nome — "
-            "retreinar notebooks/02_treinar_splink.ipynb"
-        )
-    assert "* 6" in sqls or " * 6 " in sqls
-    assert "<= 2" not in sqls
