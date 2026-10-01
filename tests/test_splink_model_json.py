@@ -1,4 +1,4 @@
-"""Contrato do JSON (02) e das 13 regras de predição (02b)."""
+"""Contrato do JSON (02) e das 15 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -73,8 +73,8 @@ def comparison_names(model: dict) -> list[str]:
     return [c["output_column_name"] for c in model["comparisons"]]
 
 
-def test_doze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
-    assert len(blocking_cols) == 12
+def test_quatorze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
+    assert len(blocking_cols) == 14
     assert blocking_cols[0] == ("nome_completo_phon",)
     assert (
         "primeiro_nome_phon",
@@ -104,6 +104,19 @@ def test_doze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
     ) in blocking_cols
     assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") in blocking_cols
     assert ("nome_mae_phon", "data_nascimento") in blocking_cols
+    assert (
+        "primeiro_nome_phon",
+        "mes_nascimento",
+        "ano_nascimento",
+        "sexo",
+        "cep",
+    ) in blocking_cols
+    assert (
+        "nome_mae_phon",
+        "ano_nascimento",
+        "mes_nascimento",
+        "sexo",
+    ) in blocking_cols
     assert ("data_nascimento", "sexo", "cep") not in blocking_cols
     assert ("data_nascimento", "cep") not in blocking_cols
     assert ("data_nascimento", "uf", "sexo", "cep") not in blocking_cols
@@ -111,7 +124,7 @@ def test_doze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
 
 def test_doze_regra_dl_sql() -> None:
     src = _blocking_src_02b()
-    assert src.count("block_on(") == 12
+    assert src.count("block_on(") == 14
     assert "nome_mae_phon" in src
     assert "damerau_levenshtein" in src
     assert "l.primeiro_nome_phon" in src
@@ -154,11 +167,28 @@ def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None
         "sexo",
         "cep",
     ) in com_sexo
-    assert len(com_sexo) == 3
+    assert (
+        "primeiro_nome_phon",
+        "mes_nascimento",
+        "ano_nascimento",
+        "sexo",
+        "cep",
+    ) in com_sexo
+    assert (
+        "nome_mae_phon",
+        "ano_nascimento",
+        "mes_nascimento",
+        "sexo",
+    ) in com_sexo
+    assert len(com_sexo) == 5
     for cols in blocking_cols:
         if "primeiro_nome_phon" in cols and "ultimo_nome_phon" in cols:
             assert "sexo" not in cols
-        if "primeiro_nome_phon" in cols and "ultimo_nome_phon" not in cols:
+        if (
+            "primeiro_nome_phon" in cols
+            and "ultimo_nome_phon" not in cols
+            and "cep" not in cols
+        ):
             assert "sexo" not in cols
 
 
