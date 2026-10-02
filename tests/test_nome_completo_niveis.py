@@ -1,4 +1,4 @@
-"""Níveis do nome completo: prefixo, JW, DL; proporção no primeiro nome."""
+"""Níveis do nome completo: prefixo, um ou dois tokens, JW, DL."""
 
 from __future__ import annotations
 
@@ -17,6 +17,30 @@ PREFIXO_SQL = """
         least(len(string_split(nome_l, ' ')), len(string_split(nome_r, ' ')))
     )
 """
+
+def _token_sql(max_tokens: str, ultimo_igual: bool) -> str:
+    n_tok = "len(string_split(nome_l, ' '))"
+    split_l = "string_split(nome_l, ' ')"
+    split_r = "string_split(nome_r, ' ')"
+    dif_count = (
+        f"(SELECT COUNT(*) FROM range(1, {n_tok} + 1) AS t(i) "
+        f"WHERE {split_l}[t.i] <> {split_r}[t.i])"
+    )
+    dif_max = (
+        f"(SELECT MAX(damerau_levenshtein({split_l}[t.i], {split_r}[t.i])) "
+        f"FROM range(1, {n_tok} + 1) AS t(i) "
+        f"WHERE {split_l}[t.i] <> {split_r}[t.i])"
+    )
+    ultimo = f"AND {split_l}[-1] = {split_r}[-1] " if ultimo_igual else ""
+    return (
+        f"{n_tok} = len({split_r}) AND {n_tok} >= 3 "
+        f"{ultimo}"
+        f"AND {dif_count} {max_tokens} AND {dif_max} <= 2"
+    )
+
+
+UM_TOKEN_SQL = _token_sql("= 1", ultimo_igual=True)
+DOIS_TOKENS_SQL = _token_sql("BETWEEN 1 AND 2", ultimo_igual=False)
 
 JW_ULTIMO_095_SQL = """
     string_split(nome_l, ' ')[-1] = string_split(nome_r, ' ')[-1]
@@ -62,6 +86,8 @@ def _niveis(con: duckdb.DuckDBPyConnection) -> dict[tuple[str, str], str]:
             CASE
                 WHEN nome_l = nome_r THEN 'exact'
                 WHEN {PREFIXO_SQL} THEN 'prefixo'
+                WHEN {UM_TOKEN_SQL} THEN 'um_token'
+                WHEN {DOIS_TOKENS_SQL} THEN 'dois_tokens'
                 WHEN {JW_ULTIMO_095_SQL} THEN 'jw95'
                 WHEN {JW_ULTIMO_092_SQL} THEN 'jw92'
                 WHEN {DL1_SQL} THEN 'dl1'
@@ -103,14 +129,6 @@ def test_prefixo_jw_ultimo_e_sobrenome_trocado() -> None:
         )
         """
     ).fetchone()[0]
-    jw_abidias = con.execute(
-        """
-        SELECT jaro_winkler_similarity(
-            'ABIDIAS KLEMENTINO SILVA',
-            'ABDIAS KLEMENTINO SILVA'
-        )
-        """
-    ).fetchone()[0]
     con.close()
 
     assert jw_rodrigues >= 0.92
@@ -121,23 +139,13 @@ def test_prefixo_jw_ultimo_e_sobrenome_trocado() -> None:
         ("MARIA JOAQUINA SANTOS PEREIRA", "MARIA JOAQUINA SANTOS")
     ] == "prefixo"
     assert niveis[("JOANA COSTA SILVA FERREIRA", "JOANA COSTA SILVA")] == "prefixo"
-    assert niveis[("JOAO CARLOS SILVA", "JOAO KARLOS SILVA")] == "jw95"
-    assert niveis[("MARIA CLARA SOUZA", "MARIA CLRA SOUZA")] == "jw92"
+    assert niveis[("JOAO CARLOS SILVA", "JOAO KARLOS SILVA")] == "um_token"
+    assert niveis[("MARIA CLARA SOUZA", "MARIA CLRA SOUZA")] == "um_token"
     assert niveis[("ANA MARIA SILVA", "ANA MARIA SILVA")] == "exact"
-    # JW no completo pode pegar antes do DL; o par não cai no ELSE.
-    if jw_abidias >= 0.95:
-        assert niveis[
-            ("ABIDIAS KLEMENTINO SILVA", "ABDIAS KLEMENTINO SILVA")
-        ] == "jw95"
-    elif jw_abidias >= 0.92:
-        assert niveis[
-            ("ABIDIAS KLEMENTINO SILVA", "ABDIAS KLEMENTINO SILVA")
-        ] == "jw92"
-    else:
-        assert niveis[
-            ("ABIDIAS KLEMENTINO SILVA", "ABDIAS KLEMENTINO SILVA")
-        ] == "dl1"
-    assert niveis[("JOAO CARLOS SILVA", "JOAO CARLOS SILVX")] == "dl1"
+    assert niveis[
+        ("ABIDIAS KLEMENTINO SILVA", "ABDIAS KLEMENTINO SILVA")
+    ] == "um_token"
+    assert niveis[("JOAO CARLOS SILVA", "JOAO CARLOS SILVX")] == "dois_tokens"
     assert niveis[("JOSE SILVA", "JOAO SILVA")] == "else"
 
 
@@ -180,3 +188,51 @@ def test_proporcao_primeiro_nome() -> None:
     assert not passa[("JOSE", "JOAO")]
     assert not passa[("ANA", "ADA")]
     assert passa[("ANTONIO", "ANTONIA")]
+
+
+def test_um_token_e_dois_tokens() -> None:
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE pares AS SELECT * FROM (VALUES
+            ('ALICE ISADORA BARBOSA MACIEL', 'ALICIA ISADORA BARBOSA MACIEL'),
+            ('LARA SAFIA SILVA', 'LARA SOFIA SILVA'),
+            ('JAQUES DOLGAS PENHA FILHO', 'JAQUES DOUGLAS PENHA FILHO'),
+            ('CLEONITO COSTA RODRIGUES', 'CLEONILDO COSTA RODRIGUES'),
+            ('WEVERDOR MORAIS SILVA', 'WEVERTON MORAES SILVA'),
+            ('VANIKELY CINCEICAO SILVA SOUSA', 'VANIKELY CONCEICAO SILVA SOUZA'),
+            ('VALDINOR VIERA OLIVEIRA', 'VALDIONOR VIEIRA OLIVEIRA'),
+            ('RAIMUNDO SILVA', 'RAIMUNDO SILBA'),
+            ('HELENA FERREIRA SILVA', 'HELLENA LIMA SILVA'),
+            ('JHONATA FILIPE ROSA SILVA', 'JONATHAN FELIPE ROSA SILVA'),
+            ('VICTOR GABRIEL SANTOS RODRIGUES', 'VICTOR GABRIEL SANTOS PEREIRA')
+        ) v(nome_l, nome_r)
+        """
+    )
+    niveis = _niveis(con)
+    con.close()
+    for par in (
+        ("ALICE ISADORA BARBOSA MACIEL", "ALICIA ISADORA BARBOSA MACIEL"),
+        ("LARA SAFIA SILVA", "LARA SOFIA SILVA"),
+        ("JAQUES DOLGAS PENHA FILHO", "JAQUES DOUGLAS PENHA FILHO"),
+        ("CLEONITO COSTA RODRIGUES", "CLEONILDO COSTA RODRIGUES"),
+    ):
+        assert niveis[par] == "um_token"
+    for par in (
+        ("WEVERDOR MORAIS SILVA", "WEVERTON MORAES SILVA"),
+        ("VANIKELY CINCEICAO SILVA SOUSA", "VANIKELY CONCEICAO SILVA SOUZA"),
+        ("VALDINOR VIERA OLIVEIRA", "VALDIONOR VIEIRA OLIVEIRA"),
+    ):
+        assert niveis[par] == "dois_tokens"
+    assert niveis[("RAIMUNDO SILVA", "RAIMUNDO SILBA")] not in ("um_token", "dois_tokens")
+    assert niveis[("HELENA FERREIRA SILVA", "HELLENA LIMA SILVA")] not in (
+        "um_token",
+        "dois_tokens",
+    )
+    assert niveis[("JHONATA FILIPE ROSA SILVA", "JONATHAN FELIPE ROSA SILVA")] not in (
+        "um_token",
+        "dois_tokens",
+    )
+    assert niveis[
+        ("VICTOR GABRIEL SANTOS RODRIGUES", "VICTOR GABRIEL SANTOS PEREIRA")
+    ] == "else"

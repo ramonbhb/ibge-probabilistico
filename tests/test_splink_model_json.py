@@ -137,6 +137,7 @@ def test_doze_regra_dl_sql() -> None:
     assert "l.primeiro_nome_phon = r.primeiro_nome_phon" in src
     assert "l.cod_municipio = r.cod_municipio" in src
     assert "l.logradouro_norm = r.logradouro_norm" in src
+    assert "l.cep = r.cep" in src
     nb_03b = json.loads(
         (_NOTEBOOK_02B.parent / "03b_avaliar_lista_ouro.ipynb").read_text(
             encoding="utf-8"
@@ -321,6 +322,11 @@ def test_02_nome_completo_token_aware() -> None:
     assert "ultimo_nome_phon" not in src
     jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
     assert jw95.find("[-1]") < jw95.find("jaro_winkler_similarity")
+    assert "um_token_sql" in src
+    assert "dois_tokens_sql" in src
+    niveis = src[src.find("comparison_levels=") :]
+    assert niveis.find("um_token_sql") < niveis.find("jw_ultimo_095_sql")
+    assert niveis.find("dois_tokens_sql") < niveis.find("jw_ultimo_095_sql")
 
 
 def test_nome_completo_json_token_aware(model: dict) -> None:

@@ -80,7 +80,7 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 
 **REBUILD:** no NB00, `REBUILD=False` reutiliza `probabilistico.duckdb` sem refazer. **`REFILTER_GEO=True`** reusa o bronze, refaz o filtro UF/município **e reconstrói** `censo_registros` / `cpf_registros` (o 00b não lê `*_filtrado`).
 
-**Blocking Splink:** três listas distintas — predição (17 regras OR, recall) no [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb); prior (`nome_completo+DOB` e `cpf_norm`) e EM (quatro blocos apertados para `m`) no [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). Não unificar. Fonte das 17 regras: célula `blocking_rules` do 02b. `cpf_norm` e `nome_meio` **não** entram na predição. `nome_mae_phon` entra com `data_nascimento` e com ano + mês + sexo. Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sexo em `ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+sexo+cep`, `primeiro+mes+ano+sexo+cep`, `logradouro_norm+cep+ano+sexo`, `nome_mae_phon+ano+mes+sexo`, na 12ª e nas duas de idade (16ª e 17ª). CEP nas quatro regras com CEP; município nas duas de primeiro nome com mês e nas duas de idade.
+**Blocking Splink:** três listas distintas — predição (17 regras OR, recall) no [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb); prior (`nome_completo+DOB` e `cpf_norm`) e EM (quatro blocos apertados para `m`) no [`02_treinar_splink.ipynb`](notebooks/02_treinar_splink.ipynb). Não unificar. Fonte das 17 regras: célula `blocking_rules` do 02b. `cpf_norm` e `nome_meio` **não** entram na predição. `nome_mae_phon` entra com `data_nascimento` e com ano + mês + sexo. Partes da data vêm da view `splink_input` (`ano_nascimento` / `mes_nascimento` / `dia_nascimento`, `substr` da ISO). Sexo em `ultimo+mes+dia+sexo+cep`, `ultimo+mes+ano+sexo+cep`, `primeiro+mes+ano+sexo+cep`, `logradouro_norm+cep+ano+sexo`, `nome_mae_phon+ano+mes+sexo`, na 12ª e nas duas de idade (16ª e 17ª). CEP nas quatro regras com data e na 17ª (logradouro + idade); município nas duas de primeiro nome com mês e nas duas de idade.
 
 - `nome_completo_phon`
 - `primeiro_nome_phon` + `ultimo_nome_phon` + `ano_nascimento`
@@ -98,7 +98,7 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 - `nome_mae_phon` + `ano_nascimento` + `mes_nascimento` + `sexo`
 - `ultimo_nome_phon` + `ano_nascimento` + `mes_nascimento` + `sexo` + primeiro DL proporcional (`len >= 6` e `dl * 6 <= min(len)`)
 - `primeiro_nome_phon` + `ultimo_nome_phon` + `cod_municipio` + `sexo` + idade ± 1
-- `logradouro_norm` + `cod_municipio` + `sexo` + idade ± 1
+- `logradouro_norm` + `cep` + `cod_municipio` + `sexo` + idade ± 1
 
 Profile e gráfico cumulativo de pares candidatos rodam **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
 
