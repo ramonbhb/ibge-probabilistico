@@ -22,14 +22,19 @@ def _token_sql(max_tokens: str, ultimo_igual: bool) -> str:
     n_tok = "len(string_split(nome_l, ' '))"
     split_l = "string_split(nome_l, ' ')"
     split_r = "string_split(nome_r, ' ')"
+    zip_tok = f"list_zip({split_l}, {split_r})"
     dif_count = (
-        f"(SELECT COUNT(*) FROM range(1, {n_tok} + 1) AS t(i) "
-        f"WHERE {split_l}[t.i] <> {split_r}[t.i])"
+        "list_aggregate(list_transform("
+        f"{zip_tok}, "
+        "x -> CASE WHEN x[1] <> x[2] THEN 1 ELSE 0 END"
+        "), 'sum')"
     )
     dif_max = (
-        f"(SELECT MAX(damerau_levenshtein({split_l}[t.i], {split_r}[t.i])) "
-        f"FROM range(1, {n_tok} + 1) AS t(i) "
-        f"WHERE {split_l}[t.i] <> {split_r}[t.i])"
+        "list_aggregate(list_transform("
+        f"{zip_tok}, "
+        "x -> CASE WHEN x[1] <> x[2] "
+        "THEN damerau_levenshtein(x[1], x[2]) ELSE 0 END"
+        "), 'max')"
     )
     ultimo = f"AND {split_l}[-1] = {split_r}[-1] " if ultimo_igual else ""
     return (
