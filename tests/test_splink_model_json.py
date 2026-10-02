@@ -278,6 +278,16 @@ def test_02_data_damerau_aninhado() -> None:
     i2 = src.find("DamerauLevenshteinLevel('data_nascimento', 2)")
     assert i1 != -1 and i2 != -1
     assert i1 < i2
+    bloco = src[src.find("ExactMatchLevel('data_nascimento'") : i1]
+    ordem = (
+        "troca_mes_dia_sql",
+        "dia_diferente_sql",
+        "mes_diferente_sql",
+        "ano_pm1_sql",
+    )
+    pos = [bloco.find(nome) for nome in ordem]
+    assert all(p != -1 for p in pos)
+    assert pos == sorted(pos)
 
 
 def test_damerau_iso_08_vs_10() -> None:
@@ -301,6 +311,82 @@ def test_damerau_iso_08_vs_10() -> None:
     assert dist[("1980-10-08", "1980-10-10")] == 2
     assert dist[("1980-10-08", "1980-10-18")] == 1
     assert dist[("1999-10-08", "2000-10-08")] > 2
+
+
+TROCA_MES_DIA_SQL = (
+    "ano_nascimento_l = ano_nascimento_r AND "
+    "mes_nascimento_l = dia_nascimento_r AND "
+    "dia_nascimento_l = mes_nascimento_r AND "
+    "mes_nascimento_l <> dia_nascimento_l"
+)
+DIA_DIFERENTE_SQL = (
+    "ano_nascimento_l = ano_nascimento_r AND "
+    "mes_nascimento_l = mes_nascimento_r AND "
+    "dia_nascimento_l <> dia_nascimento_r"
+)
+MES_DIFERENTE_SQL = (
+    "ano_nascimento_l = ano_nascimento_r AND "
+    "dia_nascimento_l = dia_nascimento_r AND "
+    "mes_nascimento_l <> mes_nascimento_r"
+)
+ANO_PM1_SQL = (
+    "mes_nascimento_l = mes_nascimento_r AND "
+    "dia_nascimento_l = dia_nascimento_r AND "
+    "abs(try_cast(ano_nascimento_l AS INTEGER) - "
+    "try_cast(ano_nascimento_r AS INTEGER)) = 1"
+)
+
+
+def test_data_por_componente() -> None:
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE pares AS SELECT * FROM (VALUES
+            ('2011-11-01', '2011-01-11'),
+            ('2010-04-10', '2010-04-08'),
+            ('2007-11-19', '2007-09-19'),
+            ('2018-03-15', '2017-03-15'),
+            ('1999-10-08', '2000-10-08'),
+            ('2007-01-28', '2017-03-28')
+        ) v(data_l, data_r)
+        """
+    )
+    niveis = {
+        (data_l, data_r): nivel
+        for data_l, data_r, nivel in con.execute(
+            f"""
+            SELECT data_l, data_r,
+                CASE
+                    WHEN {TROCA_MES_DIA_SQL} THEN 'troca'
+                    WHEN {DIA_DIFERENTE_SQL} THEN 'dia'
+                    WHEN {MES_DIFERENTE_SQL} THEN 'mes'
+                    WHEN {ANO_PM1_SQL} THEN 'ano'
+                    WHEN damerau_levenshtein(data_l, data_r) <= 1 THEN 'dl1'
+                    WHEN damerau_levenshtein(data_l, data_r) <= 2 THEN 'dl2'
+                    ELSE 'else'
+                END AS nivel
+            FROM (
+                SELECT
+                    data_l,
+                    data_r,
+                    substr(data_l, 1, 4) AS ano_nascimento_l,
+                    substr(data_r, 1, 4) AS ano_nascimento_r,
+                    substr(data_l, 6, 2) AS mes_nascimento_l,
+                    substr(data_r, 6, 2) AS mes_nascimento_r,
+                    substr(data_l, 9, 2) AS dia_nascimento_l,
+                    substr(data_r, 9, 2) AS dia_nascimento_r
+                FROM pares
+            )
+            """
+        ).fetchall()
+    }
+    con.close()
+    assert niveis[("2011-11-01", "2011-01-11")] == "troca"
+    assert niveis[("2010-04-10", "2010-04-08")] == "dia"
+    assert niveis[("2007-11-19", "2007-09-19")] == "mes"
+    assert niveis[("2018-03-15", "2017-03-15")] == "ano"
+    assert niveis[("1999-10-08", "2000-10-08")] == "ano"
+    assert niveis[("2007-01-28", "2017-03-28")] == "dl2"
 
 
 def test_02_nome_completo_token_aware() -> None:
