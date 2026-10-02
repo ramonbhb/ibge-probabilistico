@@ -1,4 +1,4 @@
-"""Contrato do JSON (02) e das 15 regras de predição (02b)."""
+"""Contrato do JSON (02) e das 17 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -133,6 +133,22 @@ def test_doze_regra_dl_sql() -> None:
     assert "l.mes_nascimento = r.mes_nascimento" in src
     assert "l.ultimo_nome_phon = r.ultimo_nome_phon" in src
     assert "* 6" in src
+    assert src.count("abs(l.idade - r.idade) <= 1") == 2
+    assert "l.primeiro_nome_phon = r.primeiro_nome_phon" in src
+    assert "l.cod_municipio = r.cod_municipio" in src
+    assert "l.logradouro_norm = r.logradouro_norm" in src
+    nb_03b = json.loads(
+        (_NOTEBOOK_02B.parent / "03b_avaliar_lista_ouro.ipynb").read_text(
+            encoding="utf-8"
+        )
+    )
+    src_03b = "\n".join(
+        "".join(cell.get("source", []))
+        for cell in nb_03b["cells"]
+        if "blocking_rules = [" in "".join(cell.get("source", []))
+    )
+    assert src_03b.count("block_on(") == 14
+    assert src_03b.count("abs(l.idade - r.idade) <= 1") == 2
 
 
 def test_cpf_fora_do_blocking_de_predicao(
