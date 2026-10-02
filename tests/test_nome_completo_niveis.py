@@ -47,6 +47,38 @@ def _token_sql(max_tokens: str, ultimo_igual: bool) -> str:
 UM_TOKEN_SQL = _token_sql("= 1", ultimo_igual=True)
 DOIS_TOKENS_SQL = _token_sql("BETWEEN 1 AND 2", ultimo_igual=False)
 
+_SL = "string_split(nome_l, ' ')"
+_SR = "string_split(nome_r, ' ')"
+_NL = f"len({_SL})"
+_NR = f"len({_SR})"
+
+
+def _sem_token(split: str, k: int) -> str:
+    n = f"len({split})"
+    if k == 1:
+        return f"list_slice({split}, 2, {n})"
+    return (
+        f"list_concat(list_slice({split}, 1, {k - 1}), "
+        f"list_slice({split}, {k + 1}, {n}))"
+    )
+
+
+_ORS_TOKEN = []
+for _k in range(1, 11):
+    _ORS_TOKEN.append(f"({_NL} >= {_k} AND {_sem_token(_SL, _k)} = {_SR})")
+    _ORS_TOKEN.append(f"({_NR} >= {_k} AND {_sem_token(_SR, _k)} = {_SL})")
+
+TOKEN_A_MAIS_SQL = (
+    f"abs({_NL} - {_NR}) = 1 AND least({_NL}, {_NR}) >= 3 AND ("
+    + " OR ".join(_ORS_TOKEN)
+    + ")"
+)
+ORDEM_SQL = (
+    f"{_NL} = {_NR} AND {_NL} >= 3 "
+    f"AND list_sort({_SL}) = list_sort({_SR}) "
+    f"AND {_SL} <> {_SR}"
+)
+
 JW_ULTIMO_095_SQL = """
     string_split(nome_l, ' ')[-1] = string_split(nome_r, ' ')[-1]
     AND jaro_winkler_similarity(nome_l, nome_r) >= 0.95
@@ -59,22 +91,6 @@ JW_ULTIMO_092_SQL = """
 
 DL1_SQL = """
     damerau_levenshtein(nome_l, nome_r) <= 1
-"""
-
-DL2_SQL = """
-    string_split(nome_l, ' ')[-1] = string_split(nome_r, ' ')[-1]
-    AND least(
-        len(string_split(nome_l, ' ')[1]),
-        len(string_split(nome_r, ' ')[1])
-    ) >= 6
-    AND damerau_levenshtein(nome_l, nome_r) <= 2
-    AND damerau_levenshtein(
-        string_split(nome_l, ' ')[1],
-        string_split(nome_r, ' ')[1]
-    ) * 6 <= least(
-        len(string_split(nome_l, ' ')[1]),
-        len(string_split(nome_r, ' ')[1])
-    )
 """
 
 DL_PRIMEIRO_SQL = """
@@ -93,10 +109,11 @@ def _niveis(con: duckdb.DuckDBPyConnection) -> dict[tuple[str, str], str]:
                 WHEN {PREFIXO_SQL} THEN 'prefixo'
                 WHEN {UM_TOKEN_SQL} THEN 'um_token'
                 WHEN {DOIS_TOKENS_SQL} THEN 'dois_tokens'
+                WHEN {TOKEN_A_MAIS_SQL} THEN 'token_a_mais'
+                WHEN {ORDEM_SQL} THEN 'ordem'
                 WHEN {JW_ULTIMO_095_SQL} THEN 'jw95'
                 WHEN {JW_ULTIMO_092_SQL} THEN 'jw92'
                 WHEN {DL1_SQL} THEN 'dl1'
-                WHEN {DL2_SQL} THEN 'dl2'
                 ELSE 'else'
             END AS nivel
         FROM pares
@@ -152,23 +169,6 @@ def test_prefixo_jw_ultimo_e_sobrenome_trocado() -> None:
     ] == "um_token"
     assert niveis[("JOAO CARLOS SILVA", "JOAO CARLOS SILVX")] == "dois_tokens"
     assert niveis[("JOSE SILVA", "JOAO SILVA")] == "else"
-
-
-def test_dl2_sql_completo_nao_pega_jose_joao() -> None:
-    con = duckdb.connect()
-    rows = con.execute(
-        f"""
-        SELECT nome_l, nome_r, ({DL2_SQL}) AS dl2
-        FROM (VALUES
-            ('CONSTANTINO JOSE SILVA', 'CONSTANTXNO JOXE SILVA'),
-            ('JOSE SILVA', 'JOAO SILVA')
-        ) v(nome_l, nome_r)
-        """
-    ).fetchall()
-    con.close()
-    passa = {(a, b): d for a, b, d in rows}
-    assert passa[("CONSTANTINO JOSE SILVA", "CONSTANTXNO JOXE SILVA")]
-    assert not passa[("JOSE SILVA", "JOAO SILVA")]
 
 
 def test_proporcao_primeiro_nome() -> None:
@@ -241,3 +241,36 @@ def test_um_token_e_dois_tokens() -> None:
     assert niveis[
         ("VICTOR GABRIEL SANTOS RODRIGUES", "VICTOR GABRIEL SANTOS PEREIRA")
     ] == "else"
+
+
+def test_token_a_mais_e_ordem() -> None:
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE pares AS SELECT * FROM (VALUES
+            ('NEUZIN PAULINO GUAJAJARA', 'NEUZIN PAULINO PINTO GUAJAJARA'),
+            ('LAUANE ALMEIDA SANTOS', 'LAUANE ALMEIDA DOA SANTOS'),
+            ('KAUAN MARTINS BRITO', 'KAUAN MARTINS DS BRITO'),
+            ('ELAINE FERREIRA COSTA MATOS', 'ELAINE COSTA FERREIRA MATOS'),
+            ('MARIA SILVA', 'MARIA APARECIDA SILVA'),
+            ('JOAO VIRTO LIMA CANTANHEDE', 'JOAO VITOR LIMA CANTANHEDE'),
+            ('EDYANNE MENDES', 'EDYANNE MENDES CARVALHO')
+        ) v(nome_l, nome_r)
+        """
+    )
+    niveis = _niveis(con)
+    con.close()
+    for par in (
+        ("NEUZIN PAULINO GUAJAJARA", "NEUZIN PAULINO PINTO GUAJAJARA"),
+        ("LAUANE ALMEIDA SANTOS", "LAUANE ALMEIDA DOA SANTOS"),
+        ("KAUAN MARTINS BRITO", "KAUAN MARTINS DS BRITO"),
+    ):
+        assert niveis[par] == "token_a_mais"
+    assert niveis[
+        ("ELAINE FERREIRA COSTA MATOS", "ELAINE COSTA FERREIRA MATOS")
+    ] == "ordem"
+    assert niveis[("MARIA SILVA", "MARIA APARECIDA SILVA")] != "token_a_mais"
+    assert niveis[
+        ("JOAO VIRTO LIMA CANTANHEDE", "JOAO VITOR LIMA CANTANHEDE")
+    ] == "um_token"
+    assert niveis[("EDYANNE MENDES", "EDYANNE MENDES CARVALHO")] == "prefixo"

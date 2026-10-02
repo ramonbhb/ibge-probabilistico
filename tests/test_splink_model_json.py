@@ -314,16 +314,21 @@ def test_02_nome_completo_token_aware() -> None:
     assert "NameComparison" not in src
     assert "damerau_levenshtein" in src
     assert "dl_completo_1_sql" in src
-    assert "dl_completo_2_sql" in src
+    assert "dl_completo_2_sql" not in src
+    assert "DL <= 2 proporcional" not in src
     assert "dl_token_1_sql" not in src
     assert "comparison_token" not in src
     assert "dl_primeiro_2_sql" not in src
-    assert "primeiro_nome_phon" not in src
+    assert "tf_adjustment_column='primeiro_nome_phon'" in src
+    assert "disable_tf_exact_match_detection=True" in src
+    assert "ExactMatchLevel('primeiro_nome_phon'" not in src
     assert "ultimo_nome_phon" not in src
     jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
     assert jw95.find("[-1]") < jw95.find("jaro_winkler_similarity")
     assert "um_token_sql" in src
     assert "dois_tokens_sql" in src
+    assert "token_a_mais_sql" in src
+    assert "ordem_sql" in src
     niveis = src[src.find("comparison_levels=") :]
     assert niveis.find("um_token_sql") < niveis.find("jw_ultimo_095_sql")
     assert niveis.find("dois_tokens_sql") < niveis.find("jw_ultimo_095_sql")
