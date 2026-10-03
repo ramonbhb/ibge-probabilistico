@@ -1,4 +1,4 @@
-"""Contrato do JSON (02) e das 17 regras de predição (02b)."""
+"""Contrato do JSON (02) e das 14 regras de predição (02b)."""
 
 from __future__ import annotations
 
@@ -73,8 +73,8 @@ def comparison_names(model: dict) -> list[str]:
     return [c["output_column_name"] for c in model["comparisons"]]
 
 
-def test_quatorze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
-    assert len(blocking_cols) == 14
+def test_dez_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> None:
+    assert len(blocking_cols) == 10
     assert blocking_cols[0] == ("nome_completo_phon",)
     assert (
         "primeiro_nome_phon",
@@ -102,21 +102,21 @@ def test_quatorze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> Non
         "sexo",
         "cep",
     ) in blocking_cols
-    assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") in blocking_cols
-    assert ("nome_mae_phon", "data_nascimento") in blocking_cols
+    assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") not in blocking_cols
+    assert ("nome_mae_phon", "data_nascimento") not in blocking_cols
     assert (
         "primeiro_nome_phon",
         "mes_nascimento",
         "ano_nascimento",
         "sexo",
         "cep",
-    ) in blocking_cols
+    ) not in blocking_cols
     assert (
         "nome_mae_phon",
         "ano_nascimento",
         "mes_nascimento",
         "sexo",
-    ) in blocking_cols
+    ) not in blocking_cols
     assert ("data_nascimento", "sexo", "cep") not in blocking_cols
     assert ("data_nascimento", "cep") not in blocking_cols
     assert ("data_nascimento", "uf", "sexo", "cep") not in blocking_cols
@@ -124,8 +124,8 @@ def test_quatorze_block_on_predicao(blocking_cols: list[tuple[str, ...]]) -> Non
 
 def test_doze_regra_dl_sql() -> None:
     src = _blocking_src_02b()
-    assert src.count("block_on(") == 14
-    assert "nome_mae_phon" in src
+    assert src.count("block_on(") == 10
+    assert "l.nome_mae_phon = r.nome_mae_phon" in src
     assert "damerau_levenshtein" in src
     assert "l.primeiro_nome_phon" in src
     assert "l.sexo = r.sexo" in src
@@ -133,7 +133,7 @@ def test_doze_regra_dl_sql() -> None:
     assert "l.mes_nascimento = r.mes_nascimento" in src
     assert "l.ultimo_nome_phon = r.ultimo_nome_phon" in src
     assert "* 6" in src
-    assert src.count("abs(l.idade - r.idade) <= 1") == 2
+    assert src.count("abs(l.idade - r.idade) <= 1") == 3
     assert "l.primeiro_nome_phon = r.primeiro_nome_phon" in src
     assert "l.cod_municipio = r.cod_municipio" in src
     assert "l.logradouro_norm = r.logradouro_norm" in src
@@ -148,8 +148,9 @@ def test_doze_regra_dl_sql() -> None:
         for cell in nb_03b["cells"]
         if "blocking_rules = [" in "".join(cell.get("source", []))
     )
-    assert src_03b.count("block_on(") == 14
-    assert src_03b.count("abs(l.idade - r.idade) <= 1") == 2
+    assert src_03b.count("block_on(") == 10
+    assert src_03b.count("abs(l.idade - r.idade) <= 1") == 3
+    assert "l.nome_mae_phon = r.nome_mae_phon" in src_03b
 
 
 def test_cpf_fora_do_blocking_de_predicao(
@@ -169,7 +170,6 @@ def test_meio_fora_do_blocking_de_predicao(
 
 def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None:
     com_sexo = [cols for cols in blocking_cols if "sexo" in cols]
-    assert ("logradouro_norm", "cep", "ano_nascimento", "sexo") in com_sexo
     assert (
         "ultimo_nome_phon",
         "mes_nascimento",
@@ -184,20 +184,7 @@ def test_sexo_nas_regras_esperadas(blocking_cols: list[tuple[str, ...]]) -> None
         "sexo",
         "cep",
     ) in com_sexo
-    assert (
-        "primeiro_nome_phon",
-        "mes_nascimento",
-        "ano_nascimento",
-        "sexo",
-        "cep",
-    ) in com_sexo
-    assert (
-        "nome_mae_phon",
-        "ano_nascimento",
-        "mes_nascimento",
-        "sexo",
-    ) in com_sexo
-    assert len(com_sexo) == 5
+    assert len(com_sexo) == 2
     for cols in blocking_cols:
         if "primeiro_nome_phon" in cols and "ultimo_nome_phon" in cols:
             assert "sexo" not in cols
@@ -405,8 +392,9 @@ def test_02_nome_completo_token_aware() -> None:
     assert "dl_token_1_sql" not in src
     assert "comparison_token" not in src
     assert "dl_primeiro_2_sql" not in src
-    assert "tf_adjustment_column='primeiro_nome_phon'" in src
-    assert "disable_tf_exact_match_detection=True" in src
+    assert "term_frequency_adjustments=True" in src
+    assert "tf_adjustment_column='primeiro_nome_phon'" not in src
+    assert "disable_tf_exact_match_detection" not in src
     assert "ExactMatchLevel('primeiro_nome_phon'" not in src
     assert "ultimo_nome_phon" not in src
     jw95 = src[src.find("jw_ultimo_095_sql") : src.find("jw_ultimo_092_sql")]
@@ -431,6 +419,13 @@ def test_nome_completo_json_token_aware(model: dict) -> None:
         )
     labels = [lvl.get("label_for_charts", "") for lvl in completo["comparison_levels"]]
     assert any("prefixo" in lab.lower() for lab in labels)
+    exato = next(
+        lvl
+        for lvl in completo["comparison_levels"]
+        if lvl.get("sql_condition") == '"nome_completo_phon_l" = "nome_completo_phon_r"'
+    )
+    assert exato.get("tf_adjustment_column") == "nome_completo_phon"
+    assert "disable_tf_exact_match_detection" not in exato
     for lvl in completo["comparison_levels"]:
         sql = lvl.get("sql_condition", "")
         if "jaro_winkler_similarity" in sql:
