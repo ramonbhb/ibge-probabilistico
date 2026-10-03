@@ -229,7 +229,7 @@ def test_idade_else_m_fixo(model: dict) -> None:
     assert else_lvl.get("fix_m_probability") is True
 
 
-def test_data_nascimento_else_m_fixo(model: dict) -> None:
+def test_data_nascimento_else_sem_m_fixo(model: dict) -> None:
     dob = next(
         c for c in model["comparisons"] if c["output_column_name"] == "data_nascimento"
     )
@@ -245,8 +245,33 @@ def test_data_nascimento_else_m_fixo(model: dict) -> None:
     assert "<= 2" in sqls
     else_lvl = levels[-1]
     assert else_lvl.get("sql_condition") == "ELSE"
-    assert else_lvl.get("m_probability") == 1e-6
-    assert else_lvl.get("fix_m_probability") is True
+    if else_lvl.get("fix_m_probability") is True:
+        pytest.skip(
+            "JSON antigo com ELSE data m=1e-6 fixo — "
+            "retreinar notebooks/02_treinar_splink.ipynb"
+        )
+    assert else_lvl.get("fix_m_probability") is not True
+
+
+def test_02_data_else_sem_m_fixo_no_source() -> None:
+    src = _comparisons_src_02()
+    i_dob = src.find("ExactMatchLevel('data_nascimento'")
+    i_out = src.find("output_column_name='data_nascimento'")
+    assert i_dob != -1 and i_out != -1 and i_dob < i_out
+    bloco = src[i_dob:i_out]
+    assert "DamerauLevenshteinLevel('data_nascimento', 2)" in bloco
+    assert "cll.ElseLevel()" in bloco
+    assert "m_probability=1e-6" not in bloco
+    assert "fix_m_probability=True" not in bloco
+
+
+def test_02_em_blocks_sem_cep() -> None:
+    nb = json.loads(_NOTEBOOK_02.read_text(encoding="utf-8"))
+    src = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
+    assert "block_on('sexo', 'data_nascimento', 'uf')" in src
+    assert "block_on('primeiro_nome_phon', 'ultimo_nome_phon', 'sexo', 'uf')" in src
+    assert "block_on('sexo','data_nascimento','uf',\"cep\")" not in src
+    assert "block_on('primeiro_nome_phon', 'ultimo_nome_phon','sexo','uf','cep')" not in src
 
 
 def _comparisons_src_02() -> str:
