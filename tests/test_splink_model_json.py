@@ -404,6 +404,7 @@ def test_02_nome_completo_token_aware() -> None:
     assert "token_a_mais_sql" in src
     assert "ordem_sql" in src
     niveis = src[src.find("comparison_levels=") :]
+    assert niveis.find("dl_completo_1_sql") < niveis.find("um_token_sql")
     assert niveis.find("um_token_sql") < niveis.find("jw_ultimo_095_sql")
     assert niveis.find("dois_tokens_sql") < niveis.find("jw_ultimo_095_sql")
 

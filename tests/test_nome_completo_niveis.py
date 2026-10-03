@@ -107,13 +107,13 @@ def _niveis(con: duckdb.DuckDBPyConnection) -> dict[tuple[str, str], str]:
             CASE
                 WHEN nome_l = nome_r THEN 'exact'
                 WHEN {PREFIXO_SQL} THEN 'prefixo'
+                WHEN {DL1_SQL} THEN 'dl1'
                 WHEN {UM_TOKEN_SQL} THEN 'um_token'
                 WHEN {DOIS_TOKENS_SQL} THEN 'dois_tokens'
                 WHEN {TOKEN_A_MAIS_SQL} THEN 'token_a_mais'
                 WHEN {ORDEM_SQL} THEN 'ordem'
                 WHEN {JW_ULTIMO_095_SQL} THEN 'jw95'
                 WHEN {JW_ULTIMO_092_SQL} THEN 'jw92'
-                WHEN {DL1_SQL} THEN 'dl1'
                 ELSE 'else'
             END AS nivel
         FROM pares
@@ -161,13 +161,13 @@ def test_prefixo_jw_ultimo_e_sobrenome_trocado() -> None:
         ("MARIA JOAQUINA SANTOS PEREIRA", "MARIA JOAQUINA SANTOS")
     ] == "prefixo"
     assert niveis[("JOANA COSTA SILVA FERREIRA", "JOANA COSTA SILVA")] == "prefixo"
-    assert niveis[("JOAO CARLOS SILVA", "JOAO KARLOS SILVA")] == "um_token"
-    assert niveis[("MARIA CLARA SOUZA", "MARIA CLRA SOUZA")] == "um_token"
+    assert niveis[("JOAO CARLOS SILVA", "JOAO KARLOS SILVA")] == "dl1"
+    assert niveis[("MARIA CLARA SOUZA", "MARIA CLRA SOUZA")] == "dl1"
     assert niveis[("ANA MARIA SILVA", "ANA MARIA SILVA")] == "exact"
     assert niveis[
         ("ABIDIAS KLEMENTINO SILVA", "ABDIAS KLEMENTINO SILVA")
-    ] == "um_token"
-    assert niveis[("JOAO CARLOS SILVA", "JOAO CARLOS SILVX")] == "dois_tokens"
+    ] == "dl1"
+    assert niveis[("JOAO CARLOS SILVA", "JOAO CARLOS SILVX")] == "dl1"
     assert niveis[("JOSE SILVA", "JOAO SILVA")] == "else"
 
 
@@ -216,9 +216,9 @@ def test_um_token_e_dois_tokens() -> None:
     )
     niveis = _niveis(con)
     con.close()
+    assert niveis[("LARA SAFIA SILVA", "LARA SOFIA SILVA")] == "dl1"
     for par in (
         ("ALICE ISADORA BARBOSA MACIEL", "ALICIA ISADORA BARBOSA MACIEL"),
-        ("LARA SAFIA SILVA", "LARA SOFIA SILVA"),
         ("JAQUES DOLGAS PENHA FILHO", "JAQUES DOUGLAS PENHA FILHO"),
         ("CLEONITO COSTA RODRIGUES", "CLEONILDO COSTA RODRIGUES"),
     ):
