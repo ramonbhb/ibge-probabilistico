@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -443,3 +444,300 @@ def test_mae_discorda_dob_igual_nome_diferente_veta() -> None:
     melhor = _rows(con, "melhor_por_censo")
     con.close()
     assert melhor == {}
+
+
+_NB04 = Path(__file__).resolve().parent.parent / "notebooks" / "04_atribuir.ipynb"
+_NB05 = Path(__file__).resolve().parent.parent / "notebooks" / "05_adicionar_regras.ipynb"
+
+
+def _celula_04(cell_id: str) -> str:
+    nb = json.loads(_NB04.read_text(encoding="utf-8"))
+    for cell in nb["cells"]:
+        if cell.get("id") == cell_id:
+            return "".join(cell["source"])
+    raise AssertionError(cell_id)
+
+
+def _criar_pessoas_escada(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> None:
+    con.execute(
+        """
+        CREATE TABLE pessoas (
+            unique_id VARCHAR,
+            origem VARCHAR,
+            cep VARCHAR,
+            nome_mae_phon VARCHAR,
+            nome_completo_phon VARCHAR,
+            data_nascimento VARCHAR,
+            primeiro_nome_phon VARCHAR,
+            ultimo_nome_phon VARCHAR,
+            logradouro_norm VARCHAR,
+            cod_municipio VARCHAR
+        )
+        """
+    )
+    con.executemany(
+        "INSERT INTO pessoas VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
+def _preds(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> None:
+    con.execute(
+        """
+        CREATE TABLE splink_predictions (
+            unique_id_censo VARCHAR,
+            unique_id_cpf VARCHAR,
+            match_probability DOUBLE
+        )
+        """
+    )
+    con.executemany("INSERT INTO splink_predictions VALUES (?, ?, ?)", rows)
+
+
+def _escada(con: duckdb.DuckDBPyConnection) -> dict[str, tuple]:
+    ns = {"con": con, "SPLINK_INPUT_VIEW": "pessoas", "PISO": 0.75, "TETO": 3}
+    exec(_celula_04("elegiveis"), ns)
+    exec(_celula_04("degraus"), ns)
+    return {
+        censo: (cpf, round(degrau, 3), regra)
+        for censo, cpf, degrau, regra in con.execute(
+            "SELECT unique_id_censo, unique_id_cpf, degrau, regra FROM atribuicao"
+        ).fetchall()
+    }
+
+
+def _pessoa(
+    unique_id: str,
+    primeiro: str,
+    *,
+    origem: str = "censo",
+    cep: str | None = None,
+    mae: str | None = None,
+    nome: str | None = None,
+    data: str | None = None,
+    ultimo: str | None = None,
+    logradouro: str | None = None,
+    municipio: str | None = None,
+) -> tuple:
+    return (
+        unique_id,
+        origem,
+        cep,
+        mae,
+        nome,
+        data,
+        primeiro,
+        ultimo,
+        logradouro,
+        municipio,
+    )
+
+
+def _frequentes() -> list[tuple]:
+    linhas = []
+    for i in range(10):
+        nome = "MARIA" if i == 0 else f"NOME{i:02d}"
+        for k in range(2):
+            linhas.append(_pessoa(f"freq_{i}_{k}", nome))
+    return linhas
+
+
+def test_grupo_que_passa_de_3_cai() -> None:
+    con = duckdb.connect()
+    pessoas = [_pessoa(f"censo_{i}", "ANA") for i in range(4)]
+    pessoas.append(_pessoa("cpf_X", "ANA", origem="cpf"))
+    _criar_pessoas_escada(con, pessoas)
+    _preds(con, [(f"censo_{i}", "cpf_X", 0.99) for i in range(4)])
+    lista = _escada(con)
+    con.close()
+    assert lista == {}
+
+
+def test_dois_ja_atribuidos_e_dois_novos_caem() -> None:
+    con = duckdb.connect()
+    pessoas = [
+        _pessoa("censo_A", "ANA"),
+        _pessoa("censo_B", "ANA"),
+        _pessoa("censo_C", "ANA", mae="MARIA SILVA"),
+        _pessoa("censo_D", "ANA", mae="MARIA SILVA"),
+        _pessoa("cpf_X", "ANA", origem="cpf", mae="MARIA SILVA"),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.99),
+            ("censo_B", "cpf_X", 0.991),
+            ("censo_C", "cpf_X", 0.98),
+            ("censo_D", "cpf_X", 0.981),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert set(lista) == {"censo_A", "censo_B"}
+    assert lista["censo_A"][1:] == (0.99, "score")
+
+
+def test_terceiro_ainda_cabe() -> None:
+    con = duckdb.connect()
+    pessoas = [
+        _pessoa("censo_A", "ANA"),
+        _pessoa("censo_B", "ANA"),
+        _pessoa("censo_C", "ANA", mae="MARIA SILVA"),
+        _pessoa("cpf_X", "ANA", origem="cpf", mae="MARIA SILVA"),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.99),
+            ("censo_B", "cpf_X", 0.991),
+            ("censo_C", "cpf_X", 0.98),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert set(lista) == {"censo_A", "censo_B", "censo_C"}
+    assert lista["censo_C"] == ("cpf_X", 0.975, "mae")
+
+
+def test_primeiro_nome_levenshtein_2_nao_entra() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "JOAO"),
+            _pessoa("cpf_X", "JOSE", origem="cpf"),
+            _pessoa("censo_B", "JOAO"),
+            _pessoa("cpf_Y", "JOA", origem="cpf"),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.99),
+            ("censo_B", "cpf_Y", 0.99),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert "censo_A" not in lista
+    assert lista["censo_B"] == ("cpf_Y", 0.99, "score")
+
+
+def test_corroborador_escolhe_a_primeira_regra() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa(
+                "censo_A",
+                "ANA",
+                mae="MARIA SILVA",
+                logradouro="RUA A",
+                municipio="210140",
+            ),
+            _pessoa(
+                "cpf_X",
+                "ANA",
+                origem="cpf",
+                mae="MARIA SILVA",
+                logradouro="RUA A",
+                municipio="210140",
+            ),
+        ],
+    )
+    _preds(con, [("censo_A", "cpf_X", 0.98)])
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.975, "mae")
+
+
+def test_nome_frequente_bloqueia_regras_5_e_6_e_quatro_em_cinco_passa() -> None:
+    con = duckdb.connect()
+    pessoas = _frequentes()
+    pessoas += [
+        _pessoa("censo_M", "MARIA", nome="MARIA SILVA SANTOS", cep="65000000"),
+        _pessoa(
+            "cpf_M",
+            "MARIA",
+            origem="cpf",
+            nome="MARIA SILVA SANTOS",
+            cep="65000000",
+        ),
+        _pessoa(
+            "censo_Z",
+            "ZAQUEU",
+            nome="ZAQUEU PAULA SOUZA LIMA COSTA",
+            cep="65000001",
+        ),
+        _pessoa(
+            "cpf_Z",
+            "ZAQUEU",
+            origem="cpf",
+            nome="ZAQUEU PAULA SOUZA LIMA SILVA",
+            cep="65000001",
+        ),
+        _pessoa(
+            "censo_R",
+            "RUTE",
+            nome="RUTE ALFA BETA GAMA DELTA",
+            cep="65000002",
+        ),
+        _pessoa(
+            "cpf_R",
+            "RUTE",
+            origem="cpf",
+            nome="RUTE ALFA BETA XXXX YYYY",
+            cep="65000002",
+        ),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(
+        con,
+        [
+            ("censo_M", "cpf_M", 0.98),
+            ("censo_Z", "cpf_Z", 0.98),
+            ("censo_R", "cpf_R", 0.98),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert "censo_M" not in lista
+    assert "censo_R" not in lista
+    assert lista["censo_Z"] == ("cpf_Z", 0.975, "tokens_cep")
+
+
+def test_um_para_um_recusa_cpf_com_dois_censos() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="MARIA SILVA"),
+            _pessoa("censo_B", "ANA", mae="MARIA SILVA"),
+            _pessoa("cpf_X", "ANA", origem="cpf", mae="MARIA SILVA"),
+            _pessoa("censo_C", "LIA", mae="JOANA SOUZA"),
+            _pessoa("cpf_Y", "LIA", origem="cpf", mae="JOANA SOUZA"),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.91),
+            ("censo_B", "cpf_X", 0.90),
+            ("censo_C", "cpf_Y", 0.905),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert "censo_A" not in lista
+    assert "censo_B" not in lista
+    assert lista["censo_C"] == ("cpf_Y", 0.9, "mae")
+
+
+def test_05_nao_tem_sql() -> None:
+    nb = json.loads(_NB05.read_text(encoding="utf-8"))
+    assert all(cell["cell_type"] != "code" for cell in nb["cells"])
+    texto = "\n".join("".join(cell["source"]) for cell in nb["cells"])
+    assert "04_atribuir.ipynb" in texto
+    assert "SELECT" not in texto
