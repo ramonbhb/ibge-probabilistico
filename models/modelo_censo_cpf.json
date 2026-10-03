@@ -1,0 +1,481 @@
+{
+    "link_type": "link_only",
+    "probability_two_random_records_match": 0.0001,
+    "retain_matching_columns": true,
+    "retain_intermediate_calculation_columns": true,
+    "additional_columns_to_retain": [],
+    "sql_dialect": "duckdb",
+    "linker_uid": "nn5ptkdq",
+    "em_convergence": 0.0001,
+    "max_iterations": 25,
+    "bayes_factor_column_prefix": "bf_",
+    "term_frequency_adjustment_column_prefix": "tf_",
+    "comparison_vector_value_column_prefix": "gamma_",
+    "unique_id_column_name": "unique_id",
+    "source_dataset_column_name": "source_dataset",
+    "blocking_rules_to_generate_predictions": [
+        {
+            "blocking_rule": "(l.\"data_nascimento\" = r.\"data_nascimento\") AND (l.\"fon_primeiro\" = r.\"fon_primeiro\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"data_nascimento\" = r.\"data_nascimento\") AND (l.\"fon_ultimo\" = r.\"fon_ultimo\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "l.\"nome_fonetico\" = r.\"nome_fonetico\"",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "l.\"nome_ordenado\" = r.\"nome_ordenado\"",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"fon_concat\" = r.\"fon_concat\") AND (l.\"logradouro\" = r.\"logradouro\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "l.fon_primeiro = r.fon_ultimo and l.fon_ultimo = r.fon_primeiro and l.fon_primeiro <> l.fon_ultimo",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"nome_fonetico_mae\" = r.\"nome_fonetico_mae\") AND (l.\"idade\" = r.\"idade\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "(l.\"fon_concat\" = r.\"fon_concat\") AND (l.\"idade\" = r.\"idade\")",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "l.\"telefone\" = r.\"telefone\"",
+            "sql_dialect": "duckdb"
+        },
+        {
+            "blocking_rule": "l.\"email\" = r.\"email\"",
+            "sql_dialect": "duckdb"
+        }
+    ],
+    "comparisons": [
+        {
+            "output_column_name": "nome",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_fonetico_l\" = \"nome_fonetico_r\"",
+                    "label_for_charts": "Nome fon\u00e9tico id\u00eantico",
+                    "m_probability": 0.26282304842640086,
+                    "u_probability": 8.328810815438415e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_fonetico",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "\"fon_ordenado_l\" = \"fon_ordenado_r\"",
+                    "label_for_charts": "Nome fon\u00e9tico ordenado id\u00eantico",
+                    "m_probability": 0.00035116617900099245,
+                    "u_probability": 1.8992062667032966e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "fon_ordenado",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "\"fon_concat_l\" = \"fon_concat_r\"",
+                    "label_for_charts": "Primeiro e ultimo nome foneticos exatos",
+                    "m_probability": 0.039348956199296,
+                    "u_probability": 0.00015274762067933492,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "fon_concat",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "\"fon_primeiro_l\" = \"fon_ultimo_r\" AND \"fon_primeiro_r\" = \"fon_ultimo_l\"",
+                    "label_for_charts": "Primeiro e ultimo nome trocados",
+                    "m_probability": 1.299661328809196e-06,
+                    "u_probability": 4.154513708413461e-08,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "array_length(list_intersect(\"tokens_fonetico_l\", \"tokens_fonetico_r\")) >= 3",
+                    "label_for_charts": "Tres ou mais palavras em comum",
+                    "m_probability": 0.03057295658708736,
+                    "u_probability": 1.1541634749944826e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "(jaro_winkler_similarity(\"fon_primeiro_l\", \"fon_primeiro_r\") >= 0.92) AND (jaro_winkler_similarity(\"fon_ultimo_l\", \"fon_ultimo_r\") >= 0.92)",
+                    "label_for_charts": "JW>=0.92 no primeiro e no ultimo nome",
+                    "m_probability": 0.01217546812346497,
+                    "u_probability": 6.629021206738964e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "array_length(list_intersect(\"tokens_fonetico_l\", \"tokens_fonetico_r\")) >= 2",
+                    "label_for_charts": "Duas palavras em comum",
+                    "m_probability": 0.14306653657959945,
+                    "u_probability": 0.0013569235273636709,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "\"fon_ultimo_l\" = \"fon_ultimo_r\"",
+                    "label_for_charts": "Ultimo nome fon\u00e9tico igual",
+                    "m_probability": 0.18031936667273296,
+                    "u_probability": 0.020334684775540388,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "fon_ultimo",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "\"fon_primeiro_l\" = \"fon_primeiro_r\"",
+                    "label_for_charts": "Primeiro nome fon\u00e9tico igual",
+                    "m_probability": 0.0028184751467056975,
+                    "u_probability": 0.0065307986109727646,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "fon_primeiro",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "list_max(\n                    list_transform(\n                        flatten(\n                            list_transform(\n                                \"tokens_fonetico_l\",\n                                x -> list_transform(\n                                    \"tokens_fonetico_r\",\n                                    y -> [x, y]\n                                )\n                            )\n                        ),\n                        pair -> jaro_winkler_similarity(\n                            pair[1],\n                            pair[2]\n                        )\n                    )\n                ) >= 0.9",
+                    "label_for_charts": "Alguma palavra com JW>=0.90",
+                    "m_probability": 0.1782151207152245,
+                    "u_probability": 0.06267123693772915,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.14924831853288828,
+                    "u_probability": 0.908874712334052,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "nascimento",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"data_nascimento_l\" = \"data_nascimento_r\"",
+                    "label_for_charts": "Id\u00eantica",
+                    "m_probability": 0.27396582180342544,
+                    "u_probability": 2.8385220327769687e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"data_nascimento_l\", \"data_nascimento_r\") <= 1",
+                    "label_for_charts": "1 caracter diferente",
+                    "m_probability": 0.011327675490595792,
+                    "u_probability": 0.0008776964144184559,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "substr(cast(data_nascimento_l as varchar),7,4) = substr(cast(data_nascimento_r as varchar),7,4) and substr(cast(data_nascimento_l as varchar),1,2) = substr(cast(data_nascimento_r as varchar),4,2) and substr(cast(data_nascimento_l as varchar),4,2) = substr(cast(data_nascimento_r as varchar),1,2)",
+                    "label_for_charts": "Dia e mes invertidos",
+                    "m_probability": 0.00019917810109845903,
+                    "u_probability": 1.0390240950755952e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ABS(EPOCH(try_strptime(\"data_nascimento_l\", '%d/%m/%Y')) - EPOCH(try_strptime(\"data_nascimento_r\", '%d/%m/%Y'))) <= 31557600.0",
+                    "label_for_charts": "Data de nascimento com diferen\u00e7a de menos de 1 ano",
+                    "m_probability": 0.030588162602072536,
+                    "u_probability": 0.019865216813130224,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "(data_nascimento_l is null or data_nascimento_r is null) and idade_l = idade_r",
+                    "label_for_charts": "Sem data de nascimento e mesma idade",
+                    "m_probability": 0.0049716491339074085,
+                    "u_probability": 0.0012781935142493746,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "(data_nascimento_l is null or data_nascimento_r is null) and abs(idade_l - idade_r) <= 1",
+                    "label_for_charts": "Sem data de nascimento e idade com menos de 1 ano de diferen\u00e7a",
+                    "m_probability": 0.007136513731166607,
+                    "u_probability": 0.0025584682420326786,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.6745059126623686,
+                    "u_probability": 0.9753816495548907,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "nome_fonetico_mae",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_fonetico_mae_l\" = \"nome_fonetico_mae_r\"",
+                    "label_for_charts": "Nome fon\u00e9tico igual",
+                    "m_probability": 0.23041657873948596,
+                    "u_probability": 2.4524050054252976e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_fonetico_mae",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(\"nome_fonetico_mae_l\", \"nome_fonetico_mae_r\") >= 0.92",
+                    "label_for_charts": "Nome fon\u00e9tico com JW>= 0,92",
+                    "m_probability": 0.07704304921031055,
+                    "u_probability": 9.785910970289225e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(\"nome_fonetico_mae_l\", \"nome_fonetico_mae_r\") >= 0.85",
+                    "label_for_charts": "Nome fon\u00e9tico com JW>= 0,85",
+                    "m_probability": 0.05342604680951362,
+                    "u_probability": 0.005093222878790068,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "\"nome_fonetico_mae_l\" IS NULL OR \"nome_fonetico_mae_r\" IS NULL",
+                    "label_for_charts": "Sem nome da m\u00e3e",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.6572322261693763,
+                    "u_probability": 0.9948064656065017,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "telefone",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"telefone_l\" = \"telefone_r\"",
+                    "label_for_charts": "Telefone exato",
+                    "m_probability": 0.1359782502412566,
+                    "u_probability": 3.3754797069013105e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "telefone",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"telefone_l\", \"telefone_r\") <= 1",
+                    "label_for_charts": "1 caracter diferente",
+                    "m_probability": 0.05295917749163334,
+                    "u_probability": 1.9891219701382722e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"telefone_l\", \"telefone_r\") <= 2",
+                    "label_for_charts": "2 caracteres diferentes",
+                    "m_probability": 0.01012670342807587,
+                    "u_probability": 5.1038056853992314e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "\"telefone_l\" IS NULL OR \"telefone_r\" IS NULL",
+                    "label_for_charts": "Sem telefone",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.7955584007783698,
+                    "u_probability": 0.9999466352732052,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "email",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"email_l\" = \"email_r\"",
+                    "label_for_charts": "Email exato",
+                    "m_probability": 0.23536113974787745,
+                    "u_probability": 3.487801066988102e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "email",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"email_l\", \"email_r\") <= 1",
+                    "label_for_charts": "1 caracter diferente",
+                    "m_probability": 0.047685034219563556,
+                    "u_probability": 9.300802845301607e-08,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"email_l\", \"email_r\") <= 2",
+                    "label_for_charts": "2 caracteres diferentes",
+                    "m_probability": 0.014289348392220156,
+                    "u_probability": 3.022760924723022e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "\"email_l\" IS NULL OR \"email_r\" IS NULL",
+                    "label_for_charts": "Sem email",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.7077126903572099,
+                    "u_probability": 0.9999992559357723,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "cep",
+            "comparison_levels": [
+                {
+                    "sql_condition": "SUBSTRING(cep_l, 1, 5) = SUBSTRING(cep_r, 1, 5)",
+                    "label_for_charts": "Cep exato",
+                    "m_probability": 0.5740605893784826,
+                    "u_probability": 0.004263519864301253,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(SUBSTRING(cep_l, 1, 5), SUBSTRING(cep_r, 1, 5)) <= 1",
+                    "label_for_charts": "1 caracter diferente",
+                    "m_probability": 0.06943996408390055,
+                    "u_probability": 0.03985239472689363,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(SUBSTRING(cep_l, 1, 5), SUBSTRING(cep_r, 1, 5)) <= 2",
+                    "label_for_charts": "2 caracteres diferentes",
+                    "m_probability": 0.13398831110619375,
+                    "u_probability": 0.17392356504112744,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "\"cep_l\" IS NULL OR \"cep_r\" IS NULL",
+                    "label_for_charts": "Sem cep",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.1996462699846579,
+                    "u_probability": 0.7819605203676777,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "logradouro",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"logradouro_l\" = \"logradouro_r\"",
+                    "label_for_charts": "Logradouro igual",
+                    "m_probability": 0.40928926667543275,
+                    "u_probability": 0.00027973132134692294,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "logradouro",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(\"logradouro_l\", \"logradouro_r\") >= 0.92",
+                    "label_for_charts": "Logradouro com JW>= 0,92",
+                    "m_probability": 0.02798031482745099,
+                    "u_probability": 8.039379693752277e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(\"logradouro_l\", \"logradouro_r\") >= 0.85",
+                    "label_for_charts": "Logradouro com JW>= 0,85",
+                    "m_probability": 0.023953107230482457,
+                    "u_probability": 0.0010621192346146517,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Demais casos",
+                    "m_probability": 0.526226974323324,
+                    "u_probability": 0.9985777556471009,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "sexo",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"sexo_l\" IS NULL OR \"sexo_r\" IS NULL",
+                    "label_for_charts": "sexo is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"sexo_l\" = \"sexo_r\"",
+                    "label_for_charts": "Exact match on sexo",
+                    "m_probability": 0.9911458745078351,
+                    "u_probability": 0.5002285200157012,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.008854125492164895,
+                    "u_probability": 0.49977147998429877,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        }
+    ]
+}
