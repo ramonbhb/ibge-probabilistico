@@ -2,7 +2,7 @@
 
 Pipeline interativo (notebooks + DuckDB) para preparar **bases bronze** CPF e Censo (sem empilhar), rodar **Splink link_only** (Censo × CPF) e validar a lista de ouro no [`03b_avaliar_lista_ouro.ipynb`](notebooks/03b_avaliar_lista_ouro.ipynb) ([`README_validacao_ouro.md`](README_validacao_ouro.md)).
 
-Treino e aplicação são separados: o modelo é treinado no limpo (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON, aplica as 14 regras de predição no limpo **sem** a lista de ouro e grava pares com `p ≥ 0,25`. Diagnóstico dos pares no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (cobertura em `p ≥ 0,5`). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb). Quem não saiu no 04 e tem par em `[0,25, 0,5)` vai para o [`04b_avaliar_nota_baixa.ipynb`](notebooks/04b_avaliar_nota_baixa.ipynb). Decomposição de todos os sem CPF depois do 04: [`04c_decompor_sem_cpf.ipynb`](notebooks/04c_decompor_sem_cpf.ipynb). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99).
+Treino e aplicação são separados: o modelo é treinado no limpo (`02_treinar`). A aplicação (`02b_aplicar`) carrega o JSON, aplica as 14 regras de predição no limpo **sem** a lista de ouro e grava pares com `p ≥ 0,25`. Diagnóstico dos pares no [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) (cobertura em `p ≥ 0,5`). Lista operacional no [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb). Quem não saiu no 04 e tem par em `[0,25, 0,5)` vai para o [`04b_avaliar_nota_baixa.ipynb`](notebooks/04b_avaliar_nota_baixa.ipynb). Decomposição de todos os sem CPF depois do 04: [`04c_decompor_sem_cpf.ipynb`](notebooks/04c_decompor_sem_cpf.ipynb). Faixa `[0,05, 0,25)` (após `predict` a 0,05): [`04d_avaliar_faixa_005_025.ipynb`](notebooks/04d_avaliar_faixa_005_025.ipynb). Corte: **`THRESHOLD_AVALIACAO`** (default 0,99).
 
 ## Pré-requisitos
 
@@ -70,9 +70,10 @@ Também aceitam override por ambiente: `CENSO_DIR` (default `~/singed/bases/bron
 | [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Escada de 0,99 a 0,75; veto de mãe; corroborador abaixo de 0,99; até 3 Censos por CPF (`splink_atribuicao.parquet`) |
 | [`04b_avaliar_nota_baixa.ipynb`](notebooks/04b_avaliar_nota_baixa.ipynb) | Depois do 04: melhor par em `[0,25, 0,5)` só de quem não saiu na atribuição; níveis de nome e data |
 | [`04c_decompor_sem_cpf.ipynb`](notebooks/04c_decompor_sem_cpf.ipynb) | Depois do 04: partição dos sem CPF por melhor `p`, motivo na escada (cota/veto/corroborador) e blocking das 14 regras |
+| [`04d_avaliar_faixa_005_025.ipynb`](notebooks/04d_avaliar_faixa_005_025.ipynb) | Diagnóstico: melhor par em `[0,05, 0,25)` dos sem CPF (exige `predict` a 0,05); níveis de nome e data |
 | [`05_adicionar_regras.ipynb`](notebooks/05_adicionar_regras.ipynb) | Funil na faixa `[0,95, T)`: mãe (igual ou prefixo `n ≥ 2`); senão nome+CEP; senão pontas+CEP. Depois, em `[0,98, T)`, melhor CPF com `logradouro_norm` e CEP iguais, até 3 Censos por CPF |
 
-**Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` diagnosticar aplicação → `04` exportar lista → `04b` nota baixa / `04c` decompor sem CPF → `05` regras na faixa. Validação da ouro: `03b` (limpo cheio + `LISTA_OURO_AVALIACAO_ARQUIVO`; não usa o parquet do 02b).
+**Pipeline:** `00` → `00b` → `01` → `02` treinar → `02b` aplicar → `03` diagnosticar aplicação → `04` exportar lista → `04b`/`04c`/`04d` diagnósticos → `05` regras na faixa. Validação da ouro: `03b` (limpo cheio + `LISTA_OURO_AVALIACAO_ARQUIVO`; não usa o parquet do 02b).
 
 Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_input` (view `splink_input`). Treino no limpo; predict no limpo sem ouro determinístico (`censo_limpo_aplicacao` / `cpf_limpo_aplicacao`). Sem `registro_unificado` / `registro_limpo` empilhados.
 
