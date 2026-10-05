@@ -277,6 +277,7 @@ def test_02_em_blocks_sem_cep() -> None:
     assert "l.sexo = r.sexo" in src
     assert "U_MAX_PAIRS = 500_000_000" in src
     assert "EM_MAX_PAIRS = 10_000_000" in src
+    assert src.count("max_pairs=EM_MAX_PAIRS") == 3
     assert "parameter_estimate_comparisons_chart()" in src
     assert "block_on('sexo', 'data_nascimento', 'uf')" not in src
     assert "block_on('primeiro_nome_phon', 'ultimo_nome_phon', 'sexo', 'uf')" not in src
