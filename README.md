@@ -102,7 +102,7 @@ Do NB00b em diante o Splink consome as bases limpas via `materialize_splink_inpu
 
 Profile e gráfico cumulativo de pares candidatos rodam **antes** do treino. O `Linker` usa duas views (`splink_censo` / `splink_cpf`) com `link_type='link_only'`.
 
-**Splink:** pin [`splink==5.0.0`](https://pypi.org/project/splink/5.0.0/). O `Linker` recebe `db_api=`. Saídas de comparação usam prefixo `mw_` (match weight). `predict()` aceita `num_chunks_left` / `num_chunks_right` para volume grande. O EM aceita `max_pairs`.
+**Splink:** pin [`splink==5.0.0`](https://pypi.org/project/splink/5.0.0/). As views entram no `Linker` por `db_api.register`; o apelido `censo`/`cpf` fica em `dataset_display_name`. Saídas de comparação usam prefixo `mw_` (match weight). `predict()` aceita `num_chunks_left` / `num_chunks_right` para volume grande. O EM aceita `max_pairs`.
 
 Referências: [`notebooks/_exemplo/`](notebooks/_exemplo/) (Splink + inferência mãe didática).
 
