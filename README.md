@@ -67,7 +67,7 @@ Também aceitam override por ambiente: `CENSO_DIR` (default `~/singed/bases/bron
 | [`02b_aplicar_splink.ipynb`](notebooks/02b_aplicar_splink.ipynb) | 14 regras de predição + JSON do 02 → `predict(0,25)` no limpo sem ouro → parquet estreito (sem clustering) |
 | [`03_avaliar.ipynb`](notebooks/03_avaliar.ipynb) | Funil do Censo de aplicação (cobertura em `p ≥ 0,5`), exemplos ≥ T, melhor CPF, discordância nome/DOB, 1:1 abaixo de T |
 | [`03b_avaliar_lista_ouro.ipynb`](notebooks/03b_avaliar_lista_ouro.ipynb) | Lista de ouro × `cpf_limpo`: predict + atribuição do 04 + precisão/recall/FP ([`README_validacao_ouro.md`](README_validacao_ouro.md)) |
-| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Escada de 0,99 a 0,10; mãe igual, prefixo ou JW ≥ 0,75; de 0,95 a 0,99 sem veto; corroborador abaixo de 0,99; 1:1 de 0,90 a 0,10; até 3 Censos por CPF |
+| [`04_atribuir.ipynb`](notebooks/04_atribuir.ipynb) | Escada de 0,99 a 0,10; mãe igual, prefixo ou JW ≥ 0,75; de 0,95 para cima sem veto de mãe; corroborador abaixo de 0,99; 1:1 abaixo de 0,80; até 3 Censos por CPF |
 | [`04b_avaliar_nota_baixa.ipynb`](notebooks/04b_avaliar_nota_baixa.ipynb) | Depois do 04: melhor par em `[0,25, 0,5)` só de quem não saiu na atribuição; níveis de nome e data |
 | [`04c_decompor_sem_cpf.ipynb`](notebooks/04c_decompor_sem_cpf.ipynb) | Depois do 04: partição dos sem CPF por melhor `p`, motivo na escada (cota/veto/corroborador) e blocking das 14 regras |
 | [`04d_avaliar_faixa_005_025.ipynb`](notebooks/04d_avaliar_faixa_005_025.ipynb) | Diagnóstico: melhor par em `[0,05, 0,25)` dos sem CPF (exige `predict` a 0,05); níveis de nome e data |

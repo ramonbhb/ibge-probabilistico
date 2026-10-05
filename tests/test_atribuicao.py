@@ -670,6 +670,30 @@ def test_entre_095_e_099_nao_aplica_veto() -> None:
     assert "censo_B" not in lista
 
 
+def test_acima_de_099_nao_veta_mae() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="MARIA JOANA CORREA"),
+            _pessoa("cpf_X", "ANA", origem="cpf", mae="PEDRO SOUZA"),
+            _pessoa("censo_B", "ANA", mae="MARIA JOANA CORREA"),
+            _pessoa("cpf_Y", "ANA", origem="cpf", mae="PEDRO SOUZA"),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.991),
+            ("censo_B", "cpf_Y", 0.94),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.99, "score")
+    assert "censo_B" not in lista
+
+
 def test_primeiro_nome_levenshtein_2_nao_entra() -> None:
     con = duckdb.connect()
     _criar_pessoas_escada(
@@ -777,7 +801,30 @@ def test_nome_frequente_bloqueia_regras_5_e_6_e_quatro_em_cinco_passa() -> None:
     assert lista["censo_Z"] == ("cpf_Z", 0.975, "tokens_cep")
 
 
-def test_um_para_um_recusa_cpf_com_dois_censos() -> None:
+def test_ate_080_dois_censos_no_mesmo_cpf_entram() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="MARIA SILVA"),
+            _pessoa("censo_B", "ANA", mae="MARIA SILVA"),
+            _pessoa("cpf_X", "ANA", origem="cpf", mae="MARIA SILVA"),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.91),
+            ("censo_B", "cpf_X", 0.90),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.9, "mae")
+    assert lista["censo_B"] == ("cpf_X", 0.9, "mae")
+
+
+def test_um_para_um_abaixo_de_080_recusa_cpf_com_dois_censos() -> None:
     con = duckdb.connect()
     _criar_pessoas_escada(
         con,
@@ -792,16 +839,16 @@ def test_um_para_um_recusa_cpf_com_dois_censos() -> None:
     _preds(
         con,
         [
-            ("censo_A", "cpf_X", 0.91),
-            ("censo_B", "cpf_X", 0.90),
-            ("censo_C", "cpf_Y", 0.905),
+            ("censo_A", "cpf_X", 0.79),
+            ("censo_B", "cpf_X", 0.78),
+            ("censo_C", "cpf_Y", 0.785),
         ],
     )
     lista = _escada(con)
     con.close()
     assert "censo_A" not in lista
     assert "censo_B" not in lista
-    assert lista["censo_C"] == ("cpf_Y", 0.9, "mae")
+    assert lista["censo_C"] == ("cpf_Y", 0.775, "mae")
 
 
 def test_05_nao_tem_sql() -> None:
