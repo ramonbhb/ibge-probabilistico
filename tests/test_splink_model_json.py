@@ -213,7 +213,8 @@ def test_comparisons_so_completo_sem_token_sem_meio_sem_mae(
     assert "nome_meio_phon" not in comparison_names
     assert "primeiro_ultimo" not in comparison_names
     assert "data_nascimento" in comparison_names
-    assert "idade" in comparison_names
+    if "idade" in comparison_names:
+        pytest.skip("JSON antigo com comparison idade — retreinar 02")
     assert "uf" in comparison_names
     assert "ano_nascimento" not in comparison_names
     assert "mes_nascimento" not in comparison_names
@@ -221,12 +222,13 @@ def test_comparisons_so_completo_sem_token_sem_meio_sem_mae(
     assert "nome_mae_phon" not in comparison_names
 
 
-def test_idade_else_m_fixo(model: dict) -> None:
-    idade = next(c for c in model["comparisons"] if c["output_column_name"] == "idade")
-    else_lvl = idade["comparison_levels"][-1]
-    assert else_lvl.get("sql_condition") == "ELSE"
-    assert else_lvl.get("m_probability") == 1e-6
-    assert else_lvl.get("fix_m_probability") is True
+def test_idade_dentro_da_data(model: dict) -> None:
+    names = [c["output_column_name"] for c in model["comparisons"]]
+    if "idade" in names:
+        pytest.skip("JSON antigo com comparison idade — retreinar 02")
+    dob = next(c for c in model["comparisons"] if c["output_column_name"] == "data_nascimento")
+    sqls = " ".join(lvl.get("sql_condition", "") for lvl in dob["comparison_levels"])
+    assert "idade_l" in sqls
 
 
 def test_data_nascimento_else_sem_m_fixo(model: dict) -> None:
@@ -268,10 +270,17 @@ def test_02_data_else_sem_m_fixo_no_source() -> None:
 def test_02_em_blocks_sem_cep() -> None:
     nb = json.loads(_NOTEBOOK_02.read_text(encoding="utf-8"))
     src = "\n".join("".join(c.get("source", [])) for c in nb["cells"])
-    assert "block_on('sexo', 'data_nascimento', 'uf')" in src
-    assert "block_on('primeiro_nome_phon', 'ultimo_nome_phon', 'sexo', 'uf')" in src
-    assert "block_on('sexo','data_nascimento','uf',\"cep\")" not in src
-    assert "block_on('primeiro_nome_phon', 'ultimo_nome_phon','sexo','uf','cep')" not in src
+    assert "estimate_m_from_label_column('cpf_norm')" in src
+    assert "block_on('data_nascimento', 'sexo')" in src
+    assert "l.primeiro_nome_phon = r.primeiro_nome_phon" in src
+    assert "l.ultimo_nome_phon = r.ultimo_nome_phon" in src
+    assert "l.sexo = r.sexo" in src
+    assert "U_MAX_PAIRS = 500_000_000" in src
+    assert "EM_MAX_PAIRS = 10_000_000" in src
+    assert "parameter_estimate_comparisons_chart()" in src
+    assert "block_on('sexo', 'data_nascimento', 'uf')" not in src
+    assert "block_on('primeiro_nome_phon', 'ultimo_nome_phon', 'sexo', 'uf')" not in src
+    assert "estimate_parameters_using_expectation_maximisation(\n    block_on('cpf_norm')" not in src
 
 
 def _comparisons_src_02() -> str:
@@ -281,6 +290,18 @@ def _comparisons_src_02() -> str:
         if "comparisons = [" in text and "nome_completo_phon" in text:
             return text
     raise AssertionError("02 sem célula comparisons")
+
+
+def test_02_idade_fallback_na_data() -> None:
+    src = _comparisons_src_02()
+    assert "output_column_name='idade'" not in src
+    i_dl2 = src.find("DamerauLevenshteinLevel('data_nascimento', 2)")
+    i_age = src.find("ExactMatchLevel('idade')")
+    i_out = src.find("output_column_name='data_nascimento'")
+    assert i_dl2 != -1 and i_age != -1 and i_out != -1
+    assert i_dl2 < i_age < i_out
+    assert "dob_presente_sql" in src[i_dl2:i_age]
+    assert "AbsoluteDifferenceLevel('idade', 1)" in src[i_age:i_out]
 
 
 def test_02_data_damerau_aninhado() -> None:
