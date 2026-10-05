@@ -853,7 +853,7 @@ def test_jw_mae_alto_ate_070_entra_com_data_diferente() -> None:
     assert lista["censo_B"] == ("cpf_X", 0.7, "mae")
 
 
-def test_mae_contida_de_090_entra() -> None:
+def test_mae_contida_de_050_entra() -> None:
     con = duckdb.connect()
     _criar_pessoas_escada(
         con,
@@ -877,17 +877,40 @@ def test_mae_contida_de_090_entra() -> None:
     _preds(
         con,
         [
-            ("censo_A", "cpf_X", 0.94),
-            ("censo_B", "cpf_Y", 0.89),
+            ("censo_A", "cpf_X", 0.88),
+            ("censo_B", "cpf_Y", 0.49),
         ],
     )
     lista = _escada(con)
     con.close()
-    assert lista["censo_A"] == ("cpf_X", 0.925, "mae")
+    assert lista["censo_A"] == ("cpf_X", 0.875, "mae")
     assert "censo_B" not in lista
 
 
-def test_um_para_um_abaixo_de_070_recusa_cpf_com_dois_censos() -> None:
+def test_jw_mae_alto_ate_050_entra_com_dois_censos() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="JEANE PEREIRA SERRA"),
+            _pessoa("censo_B", "ANA", mae="JEANE PEREIRA SERRA"),
+            _pessoa("cpf_X", "ANA", origem="cpf", mae="GEANE PEREIRA SERRA"),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.69),
+            ("censo_B", "cpf_X", 0.68),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.675, "mae")
+    assert lista["censo_B"] == ("cpf_X", 0.675, "mae")
+
+
+def test_um_para_um_abaixo_de_050_recusa_cpf_com_dois_censos() -> None:
     con = duckdb.connect()
     _criar_pessoas_escada(
         con,
@@ -902,16 +925,16 @@ def test_um_para_um_abaixo_de_070_recusa_cpf_com_dois_censos() -> None:
     _preds(
         con,
         [
-            ("censo_A", "cpf_X", 0.69),
-            ("censo_B", "cpf_X", 0.68),
-            ("censo_C", "cpf_Y", 0.685),
+            ("censo_A", "cpf_X", 0.49),
+            ("censo_B", "cpf_X", 0.48),
+            ("censo_C", "cpf_Y", 0.485),
         ],
     )
     lista = _escada(con)
     con.close()
     assert "censo_A" not in lista
     assert "censo_B" not in lista
-    assert lista["censo_C"] == ("cpf_Y", 0.675, "mae")
+    assert lista["censo_C"] == ("cpf_Y", 0.475, "mae")
 
 
 def test_data_uma_palavra_aceita_uma_palavra_diferente() -> None:
