@@ -495,7 +495,7 @@ def _preds(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> None:
 
 
 def _escada(con: duckdb.DuckDBPyConnection) -> dict[str, tuple]:
-    ns = {"con": con, "SPLINK_INPUT_VIEW": "pessoas", "PISO": 0.75, "TETO": 3}
+    ns = {"con": con, "SPLINK_INPUT_VIEW": "pessoas", "PISO": 0.10, "TETO": 3}
     exec(_celula_04("elegiveis"), ns)
     exec(_celula_04("degraus"), ns)
     return {
