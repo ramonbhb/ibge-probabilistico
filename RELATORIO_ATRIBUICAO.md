@@ -9,8 +9,8 @@ Cada candidato é um par: uma pessoa do Censo e um CPF, com uma nota de 0 a 1. A
 Antes de qualquer ficha entrar na fila, três coisas têm de ser verdade:
 
 - A nota é pelo menos 0,10.
-- Os dois lados têm primeiro nome, e eles são iguais ou diferem em no máximo uma letra.
-- Se os dois lados têm nome da mãe e esses nomes não combinam, a ficha sai. Combinar vale o nome inteiro ou o começo em comum, com pelo menos duas palavras. A exceção é nome completo e data de nascimento iguais nos dois lados: aí a ficha fica mesmo com a mãe diferente.
+- Os dois lados têm primeiro nome, e eles são iguais ou diferem em no máximo uma letra. De 0,95 até 0,99 essa exigência não vale.
+- Se os dois lados têm nome da mãe e esses nomes não combinam, a ficha sai. Combinar vale o nome inteiro, o começo em comum com pelo menos duas palavras, ou Jaro-Winkler ≥ 0,75. A exceção é nome completo e data de nascimento iguais nos dois lados: aí a ficha fica mesmo com a mãe diferente. De 0,95 até 0,99 o veto de mãe não vale.
 
 Quem sobrou desce uma escada. Cada degrau é uma fatia de 0,025 na nota, do mais certo para o menos certo. Em todo degrau, a pessoa do Censo ainda não pode ter CPF, e o CPF não pode já ter 3 pessoas do Censo. Se neste degrau o CPF passaria de 3, o grupo inteiro desse degrau fica de fora.
 
@@ -18,7 +18,7 @@ Quem sobrou desce uma escada. Cada degrau é uma fatia de 0,025 na nota, do mais
 
 **De 0,975 até 0,925.** A nota é alta, mas só entra quem tem uma prova extra. Vale a primeira que aparecer, nesta ordem:
 
-1. Nome da mãe combina.
+1. Nome da mãe combina (igual, começo em comum, ou Jaro-Winkler ≥ 0,75).
 2. Nome da rua e município combinam.
 3. Data de nascimento igual e o começo do nome completo combina.
 4. Data de nascimento igual, último nome igual e primeiro nome parecido (nome com pelo menos 6 letras e diferença pequena em relação ao tamanho).

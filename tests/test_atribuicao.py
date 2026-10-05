@@ -47,6 +47,7 @@ def _melhor_e_lista(
                 ca.nome_mae_phon IS NULL
                 OR pb.nome_mae_phon IS NULL
                 OR ca.nome_mae_phon = pb.nome_mae_phon
+                OR jaro_winkler_similarity(ca.nome_mae_phon, pb.nome_mae_phon) >= 0.75
                 OR (
                     least(
                         len(string_split(ca.nome_mae_phon, ' ')),
@@ -90,6 +91,9 @@ def _melhor_e_lista(
                         ca.nome_mae_phon IS NOT NULL AND pb.nome_mae_phon IS NOT NULL
                         AND (
                             ca.nome_mae_phon = pb.nome_mae_phon
+                            OR jaro_winkler_similarity(
+                                ca.nome_mae_phon, pb.nome_mae_phon
+                            ) >= 0.75
                             OR (
                                 least(
                                     len(string_split(ca.nome_mae_phon, ' ')),
@@ -312,7 +316,7 @@ def test_veto_mae_ambos_discordam_sai() -> None:
     assert melhor == {}
 
 
-def test_um_token_nao_prefixa_veta() -> None:
+def test_jw_mae_aceita_um_token() -> None:
     con = duckdb.connect()
     _criar_pessoas(
         con,
@@ -331,7 +335,7 @@ def test_um_token_nao_prefixa_veta() -> None:
     _melhor_e_lista(con)
     melhor = _rows(con, "melhor_por_censo")
     con.close()
-    assert melhor == {}
+    assert melhor == {"censo_A": "cpf_X"}
 
 
 def test_mae_nula_nao_veta() -> None:
@@ -599,6 +603,71 @@ def test_terceiro_ainda_cabe() -> None:
     con.close()
     assert set(lista) == {"censo_A", "censo_B", "censo_C"}
     assert lista["censo_C"] == ("cpf_X", 0.975, "mae")
+
+
+def test_jw_mae_entra_como_mae() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="JEANE PEREIRA SERRA"),
+            _pessoa("cpf_X", "ANA", origem="cpf", mae="GEANE PEREIRA SERRA"),
+        ],
+    )
+    _preds(con, [("censo_A", "cpf_X", 0.96)])
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.95, "mae")
+
+
+def test_entre_095_e_099_nao_aplica_veto() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa(
+                "censo_A",
+                "JOAO",
+                mae="MARIA JOANA CORREA",
+                logradouro="RUA A",
+                municipio="2111300",
+            ),
+            _pessoa(
+                "cpf_X",
+                "JOSE",
+                origem="cpf",
+                mae="PEDRO SOUZA",
+                logradouro="RUA A",
+                municipio="2111300",
+            ),
+            _pessoa(
+                "censo_B",
+                "JOAO",
+                mae="MARIA JOANA CORREA",
+                logradouro="RUA A",
+                municipio="2111300",
+            ),
+            _pessoa(
+                "cpf_Y",
+                "JOSE",
+                origem="cpf",
+                mae="PEDRO SOUZA",
+                logradouro="RUA A",
+                municipio="2111300",
+            ),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.96),
+            ("censo_B", "cpf_Y", 0.94),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.95, "logradouro")
+    assert "censo_B" not in lista
 
 
 def test_primeiro_nome_levenshtein_2_nao_entra() -> None:
