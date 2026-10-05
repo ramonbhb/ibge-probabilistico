@@ -858,19 +858,21 @@ def test_mae_contida_de_050_entra() -> None:
     _criar_pessoas_escada(
         con,
         [
-            _pessoa("censo_A", "ANA", mae="MARIA OLIVEIRA"),
+            _pessoa("censo_A", "ANA", mae="MARIA OLIVEIRA", data="1990-01-01"),
             _pessoa(
                 "cpf_X",
                 "ANA",
                 origem="cpf",
                 mae="MARIA CRECENCIA CONCEICAO OLIVEIRA",
+                data="1990-01-01",
             ),
-            _pessoa("censo_B", "LIA", mae="MARIA OLIVEIRA"),
+            _pessoa("censo_B", "LIA", mae="MARIA OLIVEIRA", data="1990-01-01"),
             _pessoa(
                 "cpf_Y",
                 "LIA",
                 origem="cpf",
                 mae="MARIA CRECENCIA CONCEICAO OLIVEIRA",
+                data="1990-01-01",
             ),
         ],
     )
@@ -915,9 +917,15 @@ def test_um_para_um_abaixo_de_050_recusa_cpf_com_dois_censos() -> None:
     _criar_pessoas_escada(
         con,
         [
-            _pessoa("censo_A", "ANA", mae="MARIA SILVA"),
-            _pessoa("censo_B", "ANA", mae="MARIA SILVA"),
-            _pessoa("cpf_X", "ANA", origem="cpf", mae="MARIA SILVA"),
+            _pessoa("censo_A", "ANA", mae="MARIA SILVA", data="1990-01-01"),
+            _pessoa("censo_B", "ANA", mae="MARIA SILVA", data="1990-01-01"),
+            _pessoa(
+                "cpf_X",
+                "ANA",
+                origem="cpf",
+                mae="MARIA SILVA",
+                data="1990-01-01",
+            ),
             _pessoa("censo_C", "LIA", mae="JOANA SOUZA"),
             _pessoa("cpf_Y", "LIA", origem="cpf", mae="JOANA SOUZA"),
         ],
@@ -935,6 +943,77 @@ def test_um_para_um_abaixo_de_050_recusa_cpf_com_dois_censos() -> None:
     assert "censo_A" not in lista
     assert "censo_B" not in lista
     assert lista["censo_C"] == ("cpf_Y", 0.475, "mae")
+
+
+def test_mae_contida_com_data_nula_acima_de_040() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="FRANCISCA SANTOS"),
+            _pessoa("censo_B", "ANA", mae="FRANCISCA SANTOS"),
+            _pessoa(
+                "cpf_X",
+                "ANA",
+                origem="cpf",
+                mae="DOMINGAS FRANCISCA SANTOS",
+            ),
+            _pessoa("censo_C", "LIA", mae="FRANCISCA SANTOS"),
+            _pessoa(
+                "cpf_Y",
+                "LIA",
+                origem="cpf",
+                mae="DOMINGAS FRANCISCA SANTOS",
+            ),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.46),
+            ("censo_B", "cpf_X", 0.45),
+            ("censo_C", "cpf_Y", 0.39),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.45, "mae")
+    assert lista["censo_B"] == ("cpf_X", 0.45, "mae")
+    assert "censo_C" not in lista
+
+
+def test_mae_um_nome_contido_acima_de_090() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "JOAU", mae="MARIA"),
+            _pessoa(
+                "cpf_X",
+                "JOAU",
+                origem="cpf",
+                mae="ANTONIA MARIA SANTOS OLIVEIRA",
+            ),
+            _pessoa("censo_B", "LIA", mae="MARIA"),
+            _pessoa(
+                "cpf_Y",
+                "LIA",
+                origem="cpf",
+                mae="ANTONIA MARIA SANTOS OLIVEIRA",
+            ),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.92),
+            ("censo_B", "cpf_Y", 0.85),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.9, "mae")
+    assert "censo_B" not in lista
 
 
 def test_data_uma_palavra_aceita_uma_palavra_diferente() -> None:
