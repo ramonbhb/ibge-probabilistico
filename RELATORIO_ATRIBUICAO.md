@@ -22,9 +22,10 @@ Quem sobrou desce uma escada. Cada degrau é uma fatia de 0,025 na nota, do mais
 2. Nome da rua e município combinam.
 3. Data de nascimento igual e o começo do nome completo combina.
 4. Data de nascimento igual, último nome igual e primeiro nome parecido (nome com pelo menos 6 letras e diferença pequena em relação ao tamanho).
-5. Nome completo igual e CEP igual, e o primeiro nome não está entre os 10 mais comuns do Censo.
-6. Pelo menos 80% das palavras do nome em comum e CEP igual, com a mesma restrição do primeiro nome comum.
+5. Data igual ou com um pedaço só diferente (dia, mês, ano com um de diferença, ou um caractere), e no máximo uma palavra do nome diferente. Espaço e corte contam. Primeiro nome entre os 10 mais comuns não usa esta prova. Em nome de três palavras, a do meio trocada não entra.
+6. Nome completo igual e CEP igual, e o primeiro nome não está entre os 10 mais comuns do Censo.
+7. Pelo menos 80% das palavras do nome em comum e CEP igual, com a mesma restrição do primeiro nome comum.
 
-**De 0,775 até 0,10.** A mesma prova extra, e mais uma trava: dentro daquela fatia de nota, a pessoa do Censo só pode ter um CPF candidato e esse CPF só pode ter uma pessoa do Censo. Se houver dois candidatos na mesma fatia, nenhum dos dois entra naquele degrau. De 0,70 para cima, nome da mãe com Jaro-Winkler > 0,90 passa nessa trava, mesmo com data diferente ou vazia. Acima de 0,95, a mãe contida no outro nome também é prova, ainda que não seja o começo do nome e o Jaro-Winkler fique abaixo de 0,75.
+**De 0,775 até 0,10.** A mesma prova extra, e mais uma trava: dentro daquela fatia de nota, a pessoa do Censo só pode ter um CPF candidato e esse CPF só pode ter uma pessoa do Censo. Se houver dois candidatos na mesma fatia, nenhum dos dois entra naquele degrau. De 0,70 para cima, nome da mãe com Jaro-Winkler > 0,90 passa nessa trava, mesmo com data diferente ou vazia. De 0,90 para cima, a mãe contida no outro nome também é prova, ainda que não seja o começo do nome e o Jaro-Winkler fique abaixo de 0,75.
 
-Uma pessoa recebe um CPF só. Um CPF recebe no máximo três pessoas do Censo. A ficha aceita guarda o degrau e o motivo: `score` no topo, ou o nome da prova que liberou (`mae`, `logradouro`, `data_prefixo`, `data_primeiro`, `nome_cep`, `tokens_cep`).
+Uma pessoa recebe um CPF só. Um CPF recebe no máximo três pessoas do Censo. A ficha aceita guarda o degrau e o motivo: `score` no topo, ou o nome da prova que liberou (`mae`, `logradouro`, `data_prefixo`, `data_primeiro`, `data_uma_palavra`, `nome_cep`, `tokens_cep`).

@@ -853,7 +853,7 @@ def test_jw_mae_alto_ate_070_entra_com_data_diferente() -> None:
     assert lista["censo_B"] == ("cpf_X", 0.7, "mae")
 
 
-def test_mae_contida_acima_de_095_entra() -> None:
+def test_mae_contida_de_090_entra() -> None:
     con = duckdb.connect()
     _criar_pessoas_escada(
         con,
@@ -877,13 +877,13 @@ def test_mae_contida_acima_de_095_entra() -> None:
     _preds(
         con,
         [
-            ("censo_A", "cpf_X", 0.96),
-            ("censo_B", "cpf_Y", 0.94),
+            ("censo_A", "cpf_X", 0.94),
+            ("censo_B", "cpf_Y", 0.89),
         ],
     )
     lista = _escada(con)
     con.close()
-    assert lista["censo_A"] == ("cpf_X", 0.95, "mae")
+    assert lista["censo_A"] == ("cpf_X", 0.925, "mae")
     assert "censo_B" not in lista
 
 
@@ -912,6 +912,124 @@ def test_um_para_um_abaixo_de_070_recusa_cpf_com_dois_censos() -> None:
     assert "censo_A" not in lista
     assert "censo_B" not in lista
     assert lista["censo_C"] == ("cpf_Y", 0.675, "mae")
+
+
+def test_data_uma_palavra_aceita_uma_palavra_diferente() -> None:
+    con = duckdb.connect()
+    pessoas = _frequentes()
+    pessoas += [
+        _pessoa(
+            "censo_J",
+            "JONARA",
+            nome="JONARA SOUZA NUNIS",
+            data="1993-12-31",
+        ),
+        _pessoa(
+            "cpf_J",
+            "DIONARIA",
+            origem="cpf",
+            nome="DIONARIA SOUZA NUNIS",
+            data="1993-12-31",
+        ),
+        _pessoa(
+            "censo_V",
+            "JEAN",
+            nome="JEAN KARLUS VELOZU VILAR",
+            data="1983-02-17",
+        ),
+        _pessoa(
+            "cpf_V",
+            "JEAN",
+            origem="cpf",
+            nome="JEAN KARLUS BAROZU VILAR",
+            data="1983-02-17",
+        ),
+        _pessoa(
+            "censo_P",
+            "ANTONIU",
+            nome="ANTONIU PENHA SANTUS",
+            data="1981-08-22",
+        ),
+        _pessoa(
+            "cpf_P",
+            "ANTONIU",
+            origem="cpf",
+            nome="ANTONIU LEAU SANTUS",
+            data="1981-08-22",
+        ),
+        _pessoa(
+            "censo_M",
+            "MARIA",
+            nome="MARIA JOSE SANTOS",
+            data="1990-01-01",
+        ),
+        _pessoa(
+            "cpf_M",
+            "MARIA",
+            origem="cpf",
+            nome="MARIA JOZE SANTOS",
+            data="1990-01-01",
+        ),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(
+        con,
+        [
+            ("censo_J", "cpf_J", 0.92),
+            ("censo_V", "cpf_V", 0.92),
+            ("censo_P", "cpf_P", 0.92),
+            ("censo_M", "cpf_M", 0.92),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_J"] == ("cpf_J", 0.9, "data_uma_palavra")
+    assert lista["censo_V"] == ("cpf_V", 0.9, "data_uma_palavra")
+    assert "censo_P" not in lista
+    assert "censo_M" not in lista
+
+
+def test_data_uma_palavra_aceita_data_com_um_ano() -> None:
+    con = duckdb.connect()
+    pessoas = _frequentes()
+    pessoas += [
+        _pessoa(
+            "censo_A",
+            "ZZZ",
+            nome="ISVANIR ZESTEVES CONSAGRADU KLECILDES",
+            data="2001-05-01",
+        ),
+        _pessoa(
+            "cpf_A",
+            "ZZZ",
+            origem="cpf",
+            nome="ISVANIR ZESTEVES CONSAGRADU KLECILDES",
+            data="2002-05-01",
+        ),
+        _pessoa(
+            "censo_N",
+            "ZZY",
+            nome="ISVANIR ZESTEVES CONSAGRADU KLECILDES",
+        ),
+        _pessoa(
+            "cpf_N",
+            "ZZY",
+            origem="cpf",
+            nome="ISVANIR ZESTEVES CONSAGRADU KLECILDES",
+        ),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_A", 0.92),
+            ("censo_N", "cpf_N", 0.92),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_A", 0.9, "data_uma_palavra")
+    assert "censo_N" not in lista
 
 
 def test_05_nao_tem_sql() -> None:
