@@ -824,7 +824,70 @@ def test_ate_080_dois_censos_no_mesmo_cpf_entram() -> None:
     assert lista["censo_B"] == ("cpf_X", 0.9, "mae")
 
 
-def test_um_para_um_abaixo_de_080_recusa_cpf_com_dois_censos() -> None:
+def test_jw_mae_alto_ate_070_entra_com_data_diferente() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="JEANE PEREIRA SERRA", data="2006-07-05"),
+            _pessoa("censo_B", "ANA", mae="JEANE PEREIRA SERRA"),
+            _pessoa(
+                "cpf_X",
+                "ANA",
+                origem="cpf",
+                mae="GEANE PEREIRA SERRA",
+                data="2004-07-05",
+            ),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.72),
+            ("censo_B", "cpf_X", 0.71),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.7, "mae")
+    assert lista["censo_B"] == ("cpf_X", 0.7, "mae")
+
+
+def test_mae_contida_acima_de_095_entra() -> None:
+    con = duckdb.connect()
+    _criar_pessoas_escada(
+        con,
+        [
+            _pessoa("censo_A", "ANA", mae="MARIA OLIVEIRA"),
+            _pessoa(
+                "cpf_X",
+                "ANA",
+                origem="cpf",
+                mae="MARIA CRECENCIA CONCEICAO OLIVEIRA",
+            ),
+            _pessoa("censo_B", "LIA", mae="MARIA OLIVEIRA"),
+            _pessoa(
+                "cpf_Y",
+                "LIA",
+                origem="cpf",
+                mae="MARIA CRECENCIA CONCEICAO OLIVEIRA",
+            ),
+        ],
+    )
+    _preds(
+        con,
+        [
+            ("censo_A", "cpf_X", 0.96),
+            ("censo_B", "cpf_Y", 0.94),
+        ],
+    )
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.95, "mae")
+    assert "censo_B" not in lista
+
+
+def test_um_para_um_abaixo_de_070_recusa_cpf_com_dois_censos() -> None:
     con = duckdb.connect()
     _criar_pessoas_escada(
         con,
@@ -839,16 +902,16 @@ def test_um_para_um_abaixo_de_080_recusa_cpf_com_dois_censos() -> None:
     _preds(
         con,
         [
-            ("censo_A", "cpf_X", 0.79),
-            ("censo_B", "cpf_X", 0.78),
-            ("censo_C", "cpf_Y", 0.785),
+            ("censo_A", "cpf_X", 0.69),
+            ("censo_B", "cpf_X", 0.68),
+            ("censo_C", "cpf_Y", 0.685),
         ],
     )
     lista = _escada(con)
     con.close()
     assert "censo_A" not in lista
     assert "censo_B" not in lista
-    assert lista["censo_C"] == ("cpf_Y", 0.775, "mae")
+    assert lista["censo_C"] == ("cpf_Y", 0.675, "mae")
 
 
 def test_05_nao_tem_sql() -> None:
