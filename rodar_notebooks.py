@@ -1,10 +1,14 @@
 """Roda notebooks em sequência e grava a saída no próprio arquivo.
 
-Sem argumentos, roda 04, 04b, 04c, 04d, 04e e 06.
+Sem argumentos, roda o pipeline v2 (mãe + endereço):
+02c → 02d → 04_atribuir_mae_endereco → 05_avaliar_mae_endereco.
 
     python rodar_notebooks.py
-    python rodar_notebooks.py 04c 04e 06
+    python rodar_notebooks.py 02c 02d 04_atribuir_mae_endereco 05
     python rodar_notebooks.py notebooks/04_atribuir.ipynb
+
+Escada antiga (se precisar):
+    python rodar_notebooks.py 04 04b 04c 04d 04e 06
 
 Usa o Python deste comando. Para no primeiro erro.
 """
@@ -20,7 +24,7 @@ from nbclient.exceptions import CellExecutionError
 
 RAIZ = Path(__file__).resolve().parent
 NOTEBOOKS = RAIZ / "notebooks"
-PADRAO = ["04", "04b", "04c", "04d", "04e", "06"]
+PADRAO = ["02c", "02d", "04_atribuir_mae_endereco", "05"]
 
 
 class KernelDestePython(KernelManager):
@@ -44,7 +48,9 @@ class Cliente(NotebookClient):
     def on_cell_start(self, cell, cell_index, **kwargs):
         if cell.cell_type != "code":
             return
-        n_codigo = sum(1 for c in self.nb.cells[: cell_index + 1] if c.cell_type == "code")
+        n_codigo = sum(
+            1 for c in self.nb.cells[: cell_index + 1] if c.cell_type == "code"
+        )
         print(f"  célula {n_codigo}", flush=True)
 
 
@@ -57,6 +63,11 @@ def achar(nome):
         if not caminho.exists():
             raise SystemExit(f"Não achei {caminho}")
         return caminho
+
+    exact = NOTEBOOKS / f"{texto}.ipynb"
+    if exact.exists():
+        return exact
+
     achados = sorted(NOTEBOOKS.glob(f"{texto}_*.ipynb"))
     if len(achados) != 1:
         lista = ", ".join(p.name for p in achados) or "nenhum"
