@@ -1,4 +1,4 @@
-"""Spec do modelo v2 (mãe + endereço) e atribuição simples sem escada."""
+"""Spec do modelo v2 (mãe + endereço) e atribuição por faixas + resgate."""
 
 from __future__ import annotations
 
@@ -39,81 +39,82 @@ def test_02c_em_mae_e_endereco() -> None:
     assert "block_on('nome_completo_phon', 'data_nascimento')" in src
 
 
-def test_04_simples_sem_escada() -> None:
+def test_04_escada_resgate_spec() -> None:
     nb = json.loads(NB04.read_text(encoding="utf-8"))
     texto = "\n".join("".join(c["source"]) for c in nb["cells"])
-    assert "degraus" not in texto
+    assert "PISO_MODELO = 0.90" in texto
+    assert "PISO_RESGATE = 0.50" in texto
+    assert "PISO_BAIXO = 0.25" in texto
+    assert "regra_medio" in texto
+    assert "regra_baixo" in texto
+    assert "r1_medio" in texto
+    assert "data_plausivel" in texto
     assert "libera_11" not in texto
-    assert "PISO = 0.50" in texto
-    assert "nome_mae_phon IS NOT NULL AND pb.nome_mae_phon IS NOT NULL" in texto
-    assert "logradouro_norm = pb.logradouro_norm" in texto
-    assert "ca.cep = pb.cep" in texto
-    assert "HAVING COUNT(*) <= {TETO}" in texto or "HAVING COUNT(*) <= " in texto
+    assert "degraus = [" not in texto
+    assert "faixa VARCHAR" in texto
+    assert "coalesce(j.n_ja, 0) + g.n_novo <= {TETO}" in texto
 
 
-def test_atribuicao_simples_teto_e_desempate() -> None:
+def test_atribuicao_faixas_teto_e_desempate() -> None:
     con = duckdb.connect()
     con.execute(
         """
-        CREATE TABLE pessoas (
-            unique_id VARCHAR,
-            origem VARCHAR,
-            nome_mae_phon VARCHAR,
-            logradouro_norm VARCHAR,
-            cep VARCHAR
-        )
-        """
-    )
-    con.executemany(
-        "INSERT INTO pessoas VALUES (?, ?, ?, ?, ?)",
-        [
-            ("censo_A", "censo", "MARIA SILVA", "RUA A", "65000000"),
-            ("censo_B", "censo", None, "RUA A", "65000000"),
-            ("censo_C", "censo", "ANA", None, None),
-            ("censo_D", "censo", "ANA", None, None),
-            ("censo_E", "censo", "ANA", None, None),
-            ("censo_F", "censo", "ANA", None, None),
-            ("cpf_X", "cpf", "MARIA SILVA", "RUA A", "65000000"),
-            ("cpf_Y", "cpf", None, "RUA B", "65000001"),
-            ("cpf_Z", "cpf", None, None, None),
-        ],
-    )
-    con.execute(
-        """
-        CREATE TABLE splink_predictions (
+        CREATE TABLE pares (
             unique_id_censo VARCHAR,
             unique_id_cpf VARCHAR,
-            match_probability DOUBLE
+            match_probability DOUBLE,
+            desempate INTEGER,
+            regra_medio VARCHAR,
+            regra_baixo VARCHAR
         )
         """
     )
-    # A: empate 0.80 entre X (mãe+logr+cep) e Y → fica X
-    # B: só Y
-    # C–F: todos no Z com nota alta → 4 censos → grupo Z cai
+    # A: empate 0.80 (resgate) — X tem desempate maior → X
+    # B: 0.70 resgate com regra → Y
+    # C: 0.95 modelo → Z (n_ja=1)
+    # D,E: resgate no Z → 1+2<=3, entram; F+G no mesmo lote fariam 1+4>3
+    #     então só D,E (2 novos) com regra; F sem regra no resgate
+    # H: 0.40 baixo sem regra → fora
+    # I: 0.40 baixo com regra_baixo → W
+    # J: baixo no Z com regra → Z já tem 3 → bloqueado (COUNT >= TETO)
     con.executemany(
-        "INSERT INTO splink_predictions VALUES (?, ?, ?)",
+        "INSERT INTO pares VALUES (?, ?, ?, ?, ?, ?)",
         [
-            ("censo_A", "cpf_X", 0.80),
-            ("censo_A", "cpf_Y", 0.80),
-            ("censo_B", "cpf_Y", 0.70),
-            ("censo_C", "cpf_Z", 0.90),
-            ("censo_D", "cpf_Z", 0.89),
-            ("censo_E", "cpf_Z", 0.88),
-            ("censo_F", "cpf_Z", 0.87),
+            ("censo_A", "cpf_X", 0.80, 3, "R1", None),
+            ("censo_A", "cpf_Y", 0.80, 1, "R1", None),
+            ("censo_B", "cpf_Y", 0.70, 0, "R2", None),
+            ("censo_C", "cpf_Z", 0.95, 0, None, None),
+            ("censo_D", "cpf_Z", 0.88, 0, "R1", None),
+            ("censo_E", "cpf_Z", 0.87, 0, "R1", None),
+            ("censo_F", "cpf_Z", 0.86, 0, None, None),
+            ("censo_H", "cpf_W", 0.40, 0, None, None),
+            ("censo_I", "cpf_W", 0.40, 0, None, "R1"),
+            ("censo_J", "cpf_Z", 0.40, 0, None, "R1"),
         ],
     )
-    ns = {"con": con, "SPLINK_INPUT_VIEW": "pessoas", "PISO": 0.50, "TETO": 3}
+    ns = {
+        "con": con,
+        "PISO_MODELO": 0.90,
+        "PISO_RESGATE": 0.50,
+        "PISO_BAIXO": 0.25,
+        "TETO": 3,
+    }
     exec(_celula(NB04, "atribuir"), ns)
     lista = {
-        r[0]: r[1]
+        r[0]: (r[1], r[2], r[3])
         for r in con.execute(
-            "SELECT unique_id_censo, unique_id_cpf FROM atribuicao"
+            "SELECT unique_id_censo, unique_id_cpf, faixa, regra FROM atribuicao"
         ).fetchall()
     }
     con.close()
-    assert lista["censo_A"] == "cpf_X"
-    assert lista["censo_B"] == "cpf_Y"
-    assert "censo_C" not in lista
-    assert "censo_D" not in lista
-    assert "censo_E" not in lista
+
+    assert lista["censo_A"] == ("cpf_X", "resgate", "R1")
+    assert lista["censo_B"] == ("cpf_Y", "resgate", "R2")
+    assert lista["censo_C"] == ("cpf_Z", "modelo", "score")
+    # Z: C (modelo) + D + E (resgate) = 3; F sem regra; J bloqueado (teto)
+    assert lista["censo_D"] == ("cpf_Z", "resgate", "R1")
+    assert lista["censo_E"] == ("cpf_Z", "resgate", "R1")
     assert "censo_F" not in lista
+    assert "censo_H" not in lista
+    assert lista["censo_I"] == ("cpf_W", "baixo", "R1")
+    assert "censo_J" not in lista
