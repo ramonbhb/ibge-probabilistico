@@ -79,6 +79,31 @@ R3 só no resgate (`0,50–0,90`); foi removido do baixo.
 Dos ~119k com `p ≥ 0,50` sem CPF, só **386** são teto — o resto falhou R1/R2/R3.
 O buraco grande continua sendo **blocking** (1,28M sem par), não threshold.
 
+### Perfil: atribuídos × sem par × sem CPF com par
+
+Censo de aplicação, notebook [`05`](notebooks/05_avaliar_mae_endereco.ipynb).
+Top 1 do primeiro nome fonético na UF: **MARIA** (517.158).
+
+| | atribuído | sem par | sem CPF *com* par |
+|---|---:|---:|---:|
+| n | 4.304.328 | 1.280.313 | 494.389 |
+| sem data | 7,6% | **36,2%** | 38,5% |
+| sem mãe | 58,4% | 72,3% | **90,4%** |
+| sem CEP | 9,9% | 14,4% | 13,5% |
+| 1º nome no top 10 | 24,9% | 20,3% | **32,2%** |
+| 1º nome no top 50 | 38,0% | 31,7% | 44,0% |
+| nome com 2 tokens | 5,8% | **30,0%** | — |
+| nome com 3 tokens | 52,7% | 44,7% | — |
+| nome com 4 tokens | 38,9% | 21,8% | — |
+
+Leitura:
+
+1. **Sem data** é o maior gap do sem par (36% vs 8% nos atribuídos) — derruba várias das 14 regras.
+2. **Nome curto** (≤2 tokens) concentra no sem par (~32% vs ~6%).
+3. **Sem mãe** piora no sem par (72%), e é pior ainda em quem *já tem* candidato (90%): falta âncora para fechar.
+4. **Maria / top 10** não explicam o miss de blocking (sem par tem *menos* top 10 que atribuído). Nome frequentíssimo torna a **desambiguação** difícil quando o par existe — daí o pico de top 10 no “sem CPF com par”.
+5. ~17% do sem par tem data, nome, mãe, CEP e logradouro preenchidos: buraco fonético / sem correspondente, não missing.
+
 ---
 
 ## Regras da atribuição

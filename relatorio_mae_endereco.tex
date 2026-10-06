@@ -40,8 +40,8 @@ controle de falso positivo e cobertura aceitável.
 
 A abordagem é probabilística (Splink, \texttt{link\_only}): o modelo estima a
 probabilidade de match de cada par candidato e uma etapa posterior de
-\emph{associação} transforma essas notas em atribuições 1:1 (com teto de até
-três Censos por CPF).
+\emph{associação} transforma essas notas em atribuições com unicidade no
+registro censitário e limite operacional de até três Censos por CPF.
 
 Em relação à versão anterior do pipeline---em que a mãe entrava apenas como
 prova na atribuição---esta versão inclui \textbf{nome da mãe} e
@@ -51,16 +51,172 @@ corroboradores explícitos (regras R1/R2/R3) para não repetir um piso solto de
 nota.
 
 A validação principal usa uma lista de ouro 1:1 (pares Censo--CPF conhecidos).
-As métricas reportadas de falso positivo e falso negativo são as da
+As métricas reportadas de erro entre associações e de não-associação são as da
 \emph{associação} final, não as curvas pairwise do Splink.
+
+%----------------------------------------------------------------------
+\section{Visão geral das bases tratadas --- Brasil}
+%----------------------------------------------------------------------
+
+Antes de qualquer linkage, Censo e CPF são descritos de forma independente.
+Os volumes abaixo vêm do bronze nacional inspecionado no
+\texttt{00\_preparar\_bases} (sem filtro de UF). O limpo tratado
+nacional ainda \textbf{não} foi materializado; a parametrização do pipeline
+usou o recorte UF\,21 (seção seguinte). O notebook
+\texttt{01c\_estatisticas\_descritivas\_bases} consolida e exporta essas
+contagens (e completa missingness/tokens no bronze).
+
+\subsection{Volumes}
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Base & Registros & Observação \\
+\midrule
+CPF bronze & $275{.}895{.}048$ & $275{.}895{.}048$ CPF distintos (nome) \\
+CPF nomes fonéticos & $275{.}895{.}048$ & 1 linha por CPF \\
+Censo nomes (\texttt{censo\_pes\_nome}) & $195{.}101{.}203$ & 1 linha por \texttt{ID\_MORADOR} \\
+CPF com município 7 dígitos & $257{.}045{.}117$ & $18{.}849{.}931$ sem código \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Cobertura geográfica: o CPF bronze espraia-se pelas UFs (maiores volumes em
+municípios como São Paulo, Rio e Brasília no top nacional). O Censo pessoas
+segue a distribuição populacional dos municípios IBGE.
+
+\subsection{O que o tratamento nacional ainda precisa fechar}
+
+Para o título ``estatísticas descritivas básicas das bases \emph{tratadas}''
+em escala Brasil, o \texttt{01c} deve reportar no bronze (e, quando existir
+output \texttt{nacional/}, no limpo):
+
+\begin{itemize}
+  \item percentual válido/ausente de nome, data, sexo, mãe, município, CEP e
+        logradouro;
+  \item distribuição de sexo e de tokens do nome;
+  \item registros removidos na limpeza (óbito, sem nome, sentinelas);
+  \item indícios de duplicidade de chave.
+\end{itemize}
+
+Rodar o \texttt{01c} no servidor e colar os CSV de
+\texttt{OUTPUT\_DIR/descritiva\_bases/} nesta seção.
+
+%----------------------------------------------------------------------
+\section{Recorte experimental --- UF\,21 (Maranhão)}
+%----------------------------------------------------------------------
+
+A UF\,21 foi o ambiente para definir comparisons, blocking, faixas de
+associação e validação na lista de ouro, antes de escalar a configuração ao
+Brasil. Motivos práticos: volume manejável ($\sim$6--8\,M por lado),
+heterogeneidade onomástica forte (ex.: concentração em Maria) e
+disponibilidade da lista de referência no estado.
+
+\subsection{Universo após filtro e limpeza}
+
+Funil no \texttt{00}/\texttt{00b} (outputs salvos):
+
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Etapa & Censo & CPF & Nota \\
+\midrule
+Bronze $\to$ filtrado UF\,21 & $6{.}775{.}805$ & $8{.}447{.}170$ &
+  CPF: de $275{.}895{.}048$ \\
+Registros (staging) & $6{.}775{.}805$ & $8{.}447{.}170$ & \\
+Limpo (\texttt{00b}) & $6{.}589{.}804$ & $8{.}447{.}170$ &
+  $-186{.}001$ Censos sem nome \\
+Aplicação (sem ouro exclusão) & $6{.}079{.}030$ & $7{.}931{.}465$ &
+  tira lista determinística \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Óbito: corte desligado (\texttt{ANO\_OBITO\_CORTE}$=0$) nesta rodada.
+Sentinelas (CEP/$00000000$, datas inválidas, sexo~$9$) viram NULL na limpeza;
+no CPF, $1{.}156$ sexos inválidos foram descartados como categoria.
+
+\subsection{Completude no limpo (Censo $\times$ CPF)}
+
+Percentual \emph{preenchido} no limpo UF\,21 (\texttt{01} / \texttt{00b}):
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Campo & Censo (\%) & CPF (\%) \\
+\midrule
+nome completo / fonético & $100{,}0$ & $100{,}0$ \\
+primeiro nome & $100{,}0$ & $100{,}0$ \\
+último nome & $99{,}6$ & $100{,}0$ \\
+nome do meio & $88{,}4$ & $96{,}0$ \\
+data de nascimento & $85{,}1$ & $97{,}0$ \\
+sexo & $100{,}0$ & $100{,}0$ \\
+nome da mãe & $33{,}8$ & $96{,}9$ \\
+CEP & $89{,}0$ & $100{,}0$ \\
+logradouro & $100{,}0$ & $98{,}9$ \\
+município / UF & $100{,}0$ & $100{,}0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Diferença crítica para o pareamento: \textbf{mãe} ($34\%$ vs $97\%$) e, em
+menor grau, data ($85\%$ vs $97\%$). Endereço no Censo vem do CNEFE
+(logradouro quase sempre preenchido); CEP tem mais furo no Censo.
+
+\subsection{Sexo, idade e nomes}
+
+\begin{itemize}
+  \item Sexo no limpo: Censo $50{,}9\%$ F / $49{,}1\%$ M; CPF $\sim 49{,}2\%$ F /
+        $50{,}8\%$ M (após tirar sexo inválido).
+  \item Idade preenchida: CPF $97\%$ (média $37{,}2$); Censo só $14{,}9\%$ na
+        coluna de idade de linkage quando a data existe o modelo usa a data
+        ($85\%$ com data válida).
+  \item Primeiro nome mais frequente: \textbf{Maria} (Censo $579{.}880$; CPF
+        $772{.}583$). Último: Silva / Santos / Sousa.
+\end{itemize}
+
+Distribuição de tokens do nome fonético e top municípios: ver saída do
+\texttt{01c} (e perfil dos sem par no \texttt{05}).
+
+\subsection{Conjunto de referência (lista de ouro)}
+
+\begin{itemize}
+  \item Lista de \textbf{exclusão} da aplicação (\texttt{LISTA\_OURO\_ARQUIVO}):
+        carimba/retira da aplicação; no limpo UF\,21 restam $510{.}774$ Censos
+        com CPF da lista.
+  \item Lista de \textbf{avaliação} (\texttt{LISTA\_OURO\_AVALIACAO\_ARQUIVO}):
+        usada no \texttt{03c}. Pares 1:1 com ambos os ids no limpo:
+        $G = 661{.}722$.
+\end{itemize}
+
+A ouro de avaliação é mais ``fácil'' que a aplicação média (maior chance de
+par verdadeiro encontrável); as taxas de erro/recall da seção de validação
+valem nessa população, não se transportam cruas aos $4{,}3$\,M atribuídos.
+
+\subsection{Por que parametrizar na UF\,21}
+
+\begin{enumerate}
+  \item Volume compatível com treino EM, predict e validação interativa.
+  \item Assimetría mãe/endereço já visível (tabela acima) --- stress-test das
+        variáveis novas do modelo.
+  \item Onomástica concentrada (Maria etc.), que pressiona blocking e
+        desambiguação.
+  \item Existência de lista de referência no estado para medir erro entre
+        associações realizadas.
+\end{enumerate}
+
+A configuração resultante (comparisons, 14 blockers, faixas $0{,}90$ /
+$0{,}50$ / $0{,}25$, R1--R3) é a candidata a ser reaplicada nacionalmente,
+não um resultado já medido no Brasil inteiro.
 
 %----------------------------------------------------------------------
 \section{Pipeline e notebooks}
 %----------------------------------------------------------------------
 
 O fluxo é sequencial. Treino e aplicação são separados: o modelo é estimado no
-limpo completo; a predição operacional roda no limpo \emph{sem} a lista ouro
-determinística de exclusão.
+limpo completo do recorte; a predição operacional roda no limpo \emph{sem} a
+lista ouro determinística de exclusão.
 
 \subsection{Preparação e diagnóstico}
 
@@ -441,6 +597,48 @@ Ou seja: \textbf{$\sim$3 em cada 4 sem CPF} estão no bloco
 ``sem par'' ($1{,}28$\,M / $1{,}77$\,M). Afrouxar o piso do modelo ou as
 regras R1--R3 move no máximo os $\sim$8\% da aplicação que já têm candidato
 com alguma nota; não mexe no buraco de $21$\,p.p.
+
+\subsection{Perfil comparativo: atribuídos $\times$ sem par $\times$ sem CPF com par}
+
+Diagnóstico no notebook \texttt{05}, sobre o Censo de aplicação.
+Primeiro nome fonético mais frequente na UF: \textbf{MARIA} ($517{.}158$ pessoas).
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Indicador & atribuído & sem par & sem CPF \emph{com} par \\
+\midrule
+$n$ & $4{.}304{.}328$ & $1{.}280{.}313$ & $494{.}389$ \\
+sem data (\%) & $7{,}6$ & $\mathbf{36{,}2}$ & $38{,}5$ \\
+sem mãe (\%) & $58{,}4$ & $72{,}3$ & $\mathbf{90{,}4}$ \\
+sem CEP (\%) & $9{,}9$ & $14{,}4$ & $13{,}5$ \\
+1º nome no top~10 (\%) & $24{,}9$ & $20{,}3$ & $\mathbf{32{,}2}$ \\
+1º nome no top~50 (\%) & $38{,}0$ & $31{,}7$ & $44{,}0$ \\
+nome com 2 tokens (\%) & $5{,}8$ & $\mathbf{30{,}0}$ & --- \\
+nome com 3 tokens (\%) & $52{,}7$ & $44{,}7$ & --- \\
+nome com 4 tokens (\%) & $38{,}9$ & $21{,}8$ & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{enumerate}
+  \item \textbf{Sem data} é o maior contraste do sem par ($36\%$ vs $8\%$ nos
+        atribuídos): várias das 14 regras de blocking usam ano/mês/dia/data.
+  \item \textbf{Nome curto} ($\le 2$ tokens) concentra no sem par
+        ($\sim 32\%$ vs $\sim 6\%$): menos âncora para regras
+        primeiro+último+$\ldots$
+  \item \textbf{Sem mãe} sobe no sem par ($72\%$) e é ainda pior em quem
+        \emph{já tem} candidato ($90\%$): falta âncora para fechar a
+        atribuição (e a 14ª regra de blocking).
+  \item \textbf{Maria / top~10} não explicam o miss de blocking --- o sem par
+        tem \emph{menos} top~10 que o atribuído. Nome frequentíssimo
+        (Maria sozinha $\sim 517$\,k) torna a \textbf{desambiguação} difícil
+        quando o candidato existe; por isso o pico de top~10 está no grupo
+        ``sem CPF com par''.
+  \item Cerca de $17\%$ do sem par tem data, nome, mãe, CEP e logradouro
+        preenchidos: buraco fonético / sem correspondente no CPF, não missing.
+\end{enumerate}
 
 \subsection{Por que $1{,}28$\,milhões não entram no pareamento}
 
