@@ -82,3 +82,17 @@ Teto 3 cumulativo entre faixas. Prioridade no par: R1 > R2 > R3.
 - **R3** — primeiro compatível + cobertura nominal + mãe presente + JW mãe (≥ 0,75); **apenas** em `0,50–0,90` (removido do baixo `< 0,50`)
 
 Universo de aplicação: **6.079.030** Censos.
+
+---
+
+## Validação na lista de ouro
+
+Notebook dedicado (não o 03b da escada antiga):
+[`notebooks/03c_avaliar_lista_ouro_mae_endereco.ipynb`](notebooks/03c_avaliar_lista_ouro_mae_endereco.ipynb).
+
+Usa `SPLINK_MODEL_MAE_ENDERECO`, blocking do 02d, `predict ≥ 0,25` e a
+atribuição modelo/resgate/baixo (R3 só no resgate). Grava
+`splink_predictions_ouro_mae_endereco.parquet`.
+
+Rodar o 03c e colar aqui o pacote de métricas (recall, precisão, FP da
+associação/escolha, decomposição do FN).
