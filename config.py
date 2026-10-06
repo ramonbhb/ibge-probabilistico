@@ -220,6 +220,9 @@ SPLINK_MODEL_JSON: Path
 SPLINK_PREDICTIONS: Path
 SPLINK_ATRIBUICAO: Path
 SPLINK_ATRIBUICAO_REGRAS: Path
+SPLINK_MODEL_MAE_ENDERECO: Path
+SPLINK_PREDICTIONS_MAE_ENDERECO: Path
+SPLINK_ATRIBUICAO_MAE_ENDERECO: Path
 
 CENSO_DIR = Path(
     os.environ.get("CENSO_DIR", Path.home() / "singed/bases/bronze/censo/2022")
@@ -316,6 +319,8 @@ def refresh_output_paths() -> Path:
     global CENSO_LIMPO, CPF_LIMPO, CENSO_LIMPO_APLICACAO, CPF_LIMPO_APLICACAO
     global SPLINK_MODEL_JSON, SPLINK_PREDICTIONS
     global SPLINK_ATRIBUICAO, SPLINK_ATRIBUICAO_REGRAS
+    global SPLINK_MODEL_MAE_ENDERECO, SPLINK_PREDICTIONS_MAE_ENDERECO
+    global SPLINK_ATRIBUICAO_MAE_ENDERECO
     OUTPUT_DIR = OUTPUT_DIR_BASE / recorte_output_slug()
     DUCKDB_ARQUIVO = OUTPUT_DIR / "probabilistico.duckdb"
     CENSO_REGISTROS = OUTPUT_DIR / "censo_registros.parquet"
@@ -328,6 +333,13 @@ def refresh_output_paths() -> Path:
     SPLINK_PREDICTIONS = OUTPUT_DIR / "splink_predictions.parquet"
     SPLINK_ATRIBUICAO = OUTPUT_DIR / "splink_atribuicao.parquet"
     SPLINK_ATRIBUICAO_REGRAS = OUTPUT_DIR / "splink_atribuicao_regras.parquet"
+    SPLINK_MODEL_MAE_ENDERECO = OUTPUT_DIR / "splink_model_mae_endereco.json"
+    SPLINK_PREDICTIONS_MAE_ENDERECO = (
+        OUTPUT_DIR / "splink_predictions_mae_endereco.parquet"
+    )
+    SPLINK_ATRIBUICAO_MAE_ENDERECO = (
+        OUTPUT_DIR / "splink_atribuicao_mae_endereco.parquet"
+    )
     return OUTPUT_DIR
 
 
@@ -1238,4 +1250,7 @@ def print_paths() -> None:
     print("MAX_CENSOS_POR_CPF:", MAX_CENSOS_POR_CPF)
     print("SPLINK_ATRIBUICAO:", SPLINK_ATRIBUICAO)
     print("SPLINK_ATRIBUICAO_REGRAS:", SPLINK_ATRIBUICAO_REGRAS)
+    print("SPLINK_MODEL_MAE_ENDERECO:", SPLINK_MODEL_MAE_ENDERECO)
+    print("SPLINK_PREDICTIONS_MAE_ENDERECO:", SPLINK_PREDICTIONS_MAE_ENDERECO)
+    print("SPLINK_ATRIBUICAO_MAE_ENDERECO:", SPLINK_ATRIBUICAO_MAE_ENDERECO)
     print("DUCKDB_ARQUIVO:", DUCKDB_ARQUIVO)
