@@ -1,14 +1,14 @@
 """Roda notebooks em sequência e grava a saída no próprio arquivo.
 
 Sem argumentos, roda o pipeline v2 (mãe + endereço):
-02c → 02d → 04_atribuir_mae_endereco → 05_avaliar_mae_endereco.
+02c → 02d → 04_atribuir_mae_endereco → 05 → 06.
 
     python rodar_notebooks.py
-    python rodar_notebooks.py 02c 02d 04_atribuir_mae_endereco 05
+    python rodar_notebooks.py 02c 02d 04_atribuir_mae_endereco 05 06
     python rodar_notebooks.py notebooks/04_atribuir.ipynb
 
 Escada antiga (se precisar):
-    python rodar_notebooks.py 04 04b 04c 04d 04e 06
+    python rodar_notebooks.py 04 04b 04c 04d 04e
 
 Usa o Python deste comando. Para no primeiro erro.
 """
@@ -24,7 +24,7 @@ from nbclient.exceptions import CellExecutionError
 
 RAIZ = Path(__file__).resolve().parent
 NOTEBOOKS = RAIZ / "notebooks"
-PADRAO = ["02c", "02d", "04_atribuir_mae_endereco", "05"]
+PADRAO = ["02c", "02d", "04_atribuir_mae_endereco", "05", "06"]
 
 
 class KernelDestePython(KernelManager):
