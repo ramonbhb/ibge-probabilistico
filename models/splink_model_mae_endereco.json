@@ -1,0 +1,333 @@
+{
+    "link_type": "link_only",
+    "probability_two_random_records_match": 8.045168258568298e-08,
+    "retain_matching_columns": true,
+    "retain_intermediate_calculation_columns": false,
+    "additional_columns_to_retain": [],
+    "sql_dialect": "duckdb",
+    "linker_uid": "cpfed330",
+    "em_convergence": 0.0001,
+    "max_iterations": 25,
+    "match_weight_column_prefix": "mw_",
+    "term_frequency_adjustment_column_prefix": "tf_",
+    "comparison_vector_value_column_prefix": "gamma_",
+    "unique_id_column_name": "unique_id",
+    "source_dataset_column_name": "source_dataset",
+    "blocking_rules_to_generate_predictions": [],
+    "comparisons": [
+        {
+            "output_column_name": "nome_completo_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_completo_phon_l\" IS NULL OR \"nome_completo_phon_r\" IS NULL",
+                    "label_for_charts": "nome_completo_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"nome_completo_phon_l\" = \"nome_completo_phon_r\"",
+                    "label_for_charts": "Exact match on nome_completo_phon",
+                    "m_probability": 0.8683701335347475,
+                    "u_probability": 1.8795142565596158e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_completo_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "least(len(string_split(nome_completo_phon_l, ' ')), len(string_split(nome_completo_phon_r, ' '))) >= 2 AND len(string_split(nome_completo_phon_l, ' ')) <> len(string_split(nome_completo_phon_r, ' ')) AND list_slice(string_split(nome_completo_phon_l, ' '), 1, least(len(string_split(nome_completo_phon_l, ' ')), len(string_split(nome_completo_phon_r, ' ')))) = list_slice(string_split(nome_completo_phon_r, ' '), 1, least(len(string_split(nome_completo_phon_l, ' ')), len(string_split(nome_completo_phon_r, ' '))))",
+                    "label_for_charts": "Prefixo de tokens",
+                    "m_probability": 0.029610872153790165,
+                    "u_probability": 1.5840210702921067e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(nome_completo_phon_l, nome_completo_phon_r) <= 1",
+                    "label_for_charts": "DL <= 1",
+                    "m_probability": 0.07166457255261229,
+                    "u_probability": 1.0655513895456088e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "len(string_split(nome_completo_phon_l, ' ')) = len(string_split(nome_completo_phon_r, ' ')) AND len(string_split(nome_completo_phon_l, ' ')) >= 3 AND string_split(nome_completo_phon_l, ' ')[-1] = string_split(nome_completo_phon_r, ' ')[-1] AND list_aggregate(list_transform(list_zip(string_split(nome_completo_phon_l, ' '), string_split(nome_completo_phon_r, ' ')), x -> CASE WHEN x[1] <> x[2] THEN 1 ELSE 0 END), 'sum') = 1 AND list_aggregate(list_transform(list_zip(string_split(nome_completo_phon_l, ' '), string_split(nome_completo_phon_r, ' ')), x -> CASE WHEN x[1] <> x[2] THEN damerau_levenshtein(x[1], x[2]) ELSE 0 END), 'max') <= 2",
+                    "label_for_charts": "Um token DL <= 2",
+                    "m_probability": 0.018372853043220685,
+                    "u_probability": 1.992975747113083e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "len(string_split(nome_completo_phon_l, ' ')) = len(string_split(nome_completo_phon_r, ' ')) AND len(string_split(nome_completo_phon_l, ' ')) >= 3 AND list_aggregate(list_transform(list_zip(string_split(nome_completo_phon_l, ' '), string_split(nome_completo_phon_r, ' ')), x -> CASE WHEN x[1] <> x[2] THEN 1 ELSE 0 END), 'sum') BETWEEN 1 AND 2 AND list_aggregate(list_transform(list_zip(string_split(nome_completo_phon_l, ' '), string_split(nome_completo_phon_r, ' ')), x -> CASE WHEN x[1] <> x[2] THEN damerau_levenshtein(x[1], x[2]) ELSE 0 END), 'max') <= 2",
+                    "label_for_charts": "Ate dois tokens DL <= 2",
+                    "m_probability": 0.009570372372401437,
+                    "u_probability": 4.222740691902969e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "abs(len(string_split(nome_completo_phon_l, ' ')) - len(string_split(nome_completo_phon_r, ' '))) = 1 AND least(len(string_split(nome_completo_phon_l, ' ')), len(string_split(nome_completo_phon_r, ' '))) >= 3 AND ((len(string_split(nome_completo_phon_l, ' ')) >= 1 AND list_slice(string_split(nome_completo_phon_l, ' '), 2, len(string_split(nome_completo_phon_l, ' '))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 1 AND list_slice(string_split(nome_completo_phon_r, ' '), 2, len(string_split(nome_completo_phon_r, ' '))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 2 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 1), list_slice(string_split(nome_completo_phon_l, ' '), 3, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 2 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 1), list_slice(string_split(nome_completo_phon_r, ' '), 3, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 3 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 2), list_slice(string_split(nome_completo_phon_l, ' '), 4, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 3 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 2), list_slice(string_split(nome_completo_phon_r, ' '), 4, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 4 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 3), list_slice(string_split(nome_completo_phon_l, ' '), 5, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 4 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 3), list_slice(string_split(nome_completo_phon_r, ' '), 5, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 5 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 4), list_slice(string_split(nome_completo_phon_l, ' '), 6, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 5 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 4), list_slice(string_split(nome_completo_phon_r, ' '), 6, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 6 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 5), list_slice(string_split(nome_completo_phon_l, ' '), 7, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 6 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 5), list_slice(string_split(nome_completo_phon_r, ' '), 7, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 7 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 6), list_slice(string_split(nome_completo_phon_l, ' '), 8, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 7 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 6), list_slice(string_split(nome_completo_phon_r, ' '), 8, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 8 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 7), list_slice(string_split(nome_completo_phon_l, ' '), 9, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 8 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 7), list_slice(string_split(nome_completo_phon_r, ' '), 9, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 9 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 8), list_slice(string_split(nome_completo_phon_l, ' '), 10, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 9 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 8), list_slice(string_split(nome_completo_phon_r, ' '), 10, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')) OR (len(string_split(nome_completo_phon_l, ' ')) >= 10 AND list_concat(list_slice(string_split(nome_completo_phon_l, ' '), 1, 9), list_slice(string_split(nome_completo_phon_l, ' '), 11, len(string_split(nome_completo_phon_l, ' ')))) = string_split(nome_completo_phon_r, ' ')) OR (len(string_split(nome_completo_phon_r, ' ')) >= 10 AND list_concat(list_slice(string_split(nome_completo_phon_r, ' '), 1, 9), list_slice(string_split(nome_completo_phon_r, ' '), 11, len(string_split(nome_completo_phon_r, ' ')))) = string_split(nome_completo_phon_l, ' ')))",
+                    "label_for_charts": "Um token a mais",
+                    "m_probability": 0.02414151243045396,
+                    "u_probability": 6.837288082917657e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "len(string_split(nome_completo_phon_l, ' ')) = len(string_split(nome_completo_phon_r, ' ')) AND len(string_split(nome_completo_phon_l, ' ')) >= 3 AND list_sort(string_split(nome_completo_phon_l, ' ')) = list_sort(string_split(nome_completo_phon_r, ' ')) AND string_split(nome_completo_phon_l, ' ') <> string_split(nome_completo_phon_r, ' ')",
+                    "label_for_charts": "Mesmos tokens, ordem diferente",
+                    "m_probability": 0.0027114249010143534,
+                    "u_probability": 6.413040770413387e-07,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "string_split(nome_completo_phon_l, ' ')[-1] = string_split(nome_completo_phon_r, ' ')[-1] AND jaro_winkler_similarity(nome_completo_phon_l, nome_completo_phon_r) >= 0.95",
+                    "label_for_charts": "Ultimo token e JW >= 0.95",
+                    "m_probability": 0.002210763032931389,
+                    "u_probability": 1.040885848120942e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "string_split(nome_completo_phon_l, ' ')[-1] = string_split(nome_completo_phon_r, ' ')[-1] AND jaro_winkler_similarity(nome_completo_phon_l, nome_completo_phon_r) >= 0.92",
+                    "label_for_charts": "Ultimo token e JW >= 0.92",
+                    "m_probability": 0.01194960436974788,
+                    "u_probability": 1.3442720076443447e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.04103800058884603,
+                    "u_probability": 0.9999530368091274,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "data_nascimento",
+            "comparison_levels": [
+                {
+                    "sql_condition": "(data_nascimento_l IS NULL OR data_nascimento_r IS NULL) AND (idade_l IS NULL OR idade_r IS NULL) AND (mes_nascimento_l IS NULL OR mes_nascimento_r IS NULL OR dia_nascimento_l IS NULL OR dia_nascimento_r IS NULL)",
+                    "label_for_charts": "Null data e mes/dia",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"data_nascimento_l\" = \"data_nascimento_r\"",
+                    "label_for_charts": "Exact match on data_nascimento",
+                    "m_probability": 0.5088946749773873,
+                    "u_probability": 3.007386284781833e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "data_nascimento",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "ano_nascimento_l = ano_nascimento_r AND mes_nascimento_l = dia_nascimento_r AND dia_nascimento_l = mes_nascimento_r AND mes_nascimento_l <> dia_nascimento_l",
+                    "label_for_charts": "Mes e dia trocados",
+                    "m_probability": 2.230952400712402e-06,
+                    "u_probability": 1.0464823865208907e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ano_nascimento_l = ano_nascimento_r AND mes_nascimento_l = mes_nascimento_r AND dia_nascimento_l <> dia_nascimento_r",
+                    "label_for_charts": "Dia diferente",
+                    "m_probability": 0.0027247483724746006,
+                    "u_probability": 0.0008719419303522152,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ano_nascimento_l = ano_nascimento_r AND dia_nascimento_l = dia_nascimento_r AND mes_nascimento_l <> mes_nascimento_r",
+                    "label_for_charts": "Mes diferente",
+                    "m_probability": 0.0017763078340701476,
+                    "u_probability": 0.0003216482669851495,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "mes_nascimento_l = mes_nascimento_r AND dia_nascimento_l = dia_nascimento_r AND abs(try_cast(ano_nascimento_l AS INTEGER) - try_cast(ano_nascimento_r AS INTEGER)) = 1",
+                    "label_for_charts": "Ano +/- 1",
+                    "m_probability": 0.0014463968302161519,
+                    "u_probability": 5.930733831066769e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"data_nascimento_l\", \"data_nascimento_r\") <= 1",
+                    "label_for_charts": "Damerau-Levenshtein distance of data_nascimento <= 1",
+                    "m_probability": 0.005119318248148797,
+                    "u_probability": 0.00031510525091646245,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "damerau_levenshtein(\"data_nascimento_l\", \"data_nascimento_r\") <= 2",
+                    "label_for_charts": "Damerau-Levenshtein distance of data_nascimento <= 2",
+                    "m_probability": 0.04511907537830479,
+                    "u_probability": 0.009236457637512588,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "data_nascimento_l IS NOT NULL AND data_nascimento_r IS NOT NULL",
+                    "label_for_charts": "Datas presentes, demais diferen\u00e7as",
+                    "m_probability": 0.8280036626064832,
+                    "u_probability": 0.8143564057287848,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "\"idade_l\" = \"idade_r\"",
+                    "label_for_charts": "Exact match on idade",
+                    "m_probability": 0.007393356249557155,
+                    "u_probability": 0.0018782457961822082,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ABS(\"idade_l\" - \"idade_r\") <= 1",
+                    "label_for_charts": "Absolute difference of 'idade' <= 1",
+                    "m_probability": 0.009223683824795862,
+                    "u_probability": 0.0037407243242845224,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.08140186974877392,
+                    "u_probability": 0.16917962503995843,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "nome_mae_phon",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"nome_mae_phon_l\" IS NULL OR \"nome_mae_phon_r\" IS NULL",
+                    "label_for_charts": "nome_mae_phon is NULL",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "\"nome_mae_phon_l\" = \"nome_mae_phon_r\"",
+                    "label_for_charts": "Exact match on nome_mae_phon",
+                    "m_probability": 0.5862553009511885,
+                    "u_probability": 7.28365576780328e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "tf_adjustment_column": "nome_mae_phon",
+                    "tf_adjustment_weight": 1.0
+                },
+                {
+                    "sql_condition": "least(len(string_split(nome_mae_phon_l, ' ')), len(string_split(nome_mae_phon_r, ' '))) >= 2 AND len(string_split(nome_mae_phon_l, ' ')) <> len(string_split(nome_mae_phon_r, ' ')) AND len(list_intersect(string_split(nome_mae_phon_l, ' '), string_split(nome_mae_phon_r, ' '))) = least(len(string_split(nome_mae_phon_l, ' ')), len(string_split(nome_mae_phon_r, ' ')))",
+                    "label_for_charts": "Contida",
+                    "m_probability": 0.08037428754305222,
+                    "u_probability": 0.0003472607607433224,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "len(string_split(nome_mae_phon_l, ' ')) = len(string_split(nome_mae_phon_r, ' ')) AND len(string_split(nome_mae_phon_l, ' ')) >= 3 AND list_sort(string_split(nome_mae_phon_l, ' ')) = list_sort(string_split(nome_mae_phon_r, ' ')) AND nome_mae_phon_l <> nome_mae_phon_r",
+                    "label_for_charts": "Mesmos tokens, ordem diferente",
+                    "m_probability": 0.003042990108253097,
+                    "u_probability": 2.5143578814882556e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(nome_mae_phon_l, nome_mae_phon_r) >= 0.92",
+                    "label_for_charts": "JW >= 0.92",
+                    "m_probability": 0.19573048827263262,
+                    "u_probability": 0.000143637682785337,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(nome_mae_phon_l, nome_mae_phon_r) >= 0.85",
+                    "label_for_charts": "JW >= 0.85",
+                    "m_probability": 0.08077052028406839,
+                    "u_probability": 0.010274045452965364,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.042305464963881864,
+                    "u_probability": 0.9892252580898567,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        },
+        {
+            "output_column_name": "endereco",
+            "comparison_levels": [
+                {
+                    "sql_condition": "(logradouro_norm_l IS NULL OR logradouro_norm_r IS NULL) AND (cep_l IS NULL OR cep_r IS NULL) AND (cod_municipio_l IS NULL OR cod_municipio_r IS NULL)",
+                    "label_for_charts": "Null / nao comparavel",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "logradouro_norm_l = logradouro_norm_r AND cep_l = cep_r",
+                    "label_for_charts": "Logradouro e CEP exact",
+                    "m_probability": 0.1704060074054298,
+                    "u_probability": 2.3479437568892432e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "logradouro_norm_l = logradouro_norm_r AND cod_municipio_l = cod_municipio_r",
+                    "label_for_charts": "Logradouro e municipio exact",
+                    "m_probability": 0.05187091916267087,
+                    "u_probability": 5.092190149589309e-05,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "jaro_winkler_similarity(logradouro_norm_l, logradouro_norm_r) >= 0.9 AND cep_l = cep_r",
+                    "label_for_charts": "Logradouro similar e CEP exact",
+                    "m_probability": 0.038817072876575265,
+                    "u_probability": 7.706990957728051e-06,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "cep_l = cep_r",
+                    "label_for_charts": "CEP exact",
+                    "m_probability": 0.4024448180235681,
+                    "u_probability": 0.004855942000412235,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "All other comparisons",
+                    "m_probability": 0.33572571493535414,
+                    "u_probability": 0.9950619496695653,
+                    "fix_m_probability": false,
+                    "fix_u_probability": false
+                }
+            ],
+            "comparison_description": "CustomComparison"
+        }
+    ]
+}
