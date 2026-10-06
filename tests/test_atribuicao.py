@@ -546,7 +546,10 @@ def _pessoa(
 def _maes_top10() -> list[tuple]:
     """Dez primeiros nomes de mãe frequentes no Censo (fixture da baixa nota)."""
     linhas = []
-    for i in range(10):
+    # MARIA com mais volume fica no topo; o restante completa o top 10.
+    for k in range(5):
+        linhas.append(_pessoa(f"seed_mae_maria_{k}", f"SEEDM{k}", mae="MARIA SILVA"))
+    for i in range(1, 10):
         nome_mae = f"FREQMAE{i:02d} SILVA"
         for k in range(2):
             linhas.append(
@@ -1232,12 +1235,12 @@ def test_baixa_nota_mae_rara_data_diferente_entra() -> None:
 def test_baixa_nota_mae_frequente_fica_fora() -> None:
     con = duckdb.connect()
     pessoas = _maes_top10()
-    # FREQMAE00 está no top 10 da fixture.
+    # MARIA está no top 10; só JW (sem contida de 3 tokens).
     pessoas += [
         _pessoa(
             "censo_A",
             "VAUTER",
-            mae="FREQMAE00 PEREIRA DAMA",
+            mae="MARIA PEREIRA DAMA",
             data="2008-12-08",
             idade=13,
         ),
@@ -1245,13 +1248,65 @@ def test_baixa_nota_mae_frequente_fica_fora() -> None:
             "cpf_X",
             "VAUTER",
             origem="cpf",
-            mae="FREQMAE00 PEREIRA DAMAS",
+            mae="MARIA PEREIRA DAMAS",
             data="2008-02-12",
             idade=14,
         ),
     ]
     _criar_pessoas_escada(con, pessoas)
     _preds(con, [("censo_A", "cpf_X", 0.076)])
+    lista = _escada(con)
+    con.close()
+    assert "censo_A" not in lista
+
+
+def test_baixa_nota_contem_3_tokens_aceita_mae_frequente() -> None:
+    con = duckdb.connect()
+    pessoas = _maes_top10()
+    pessoas += [
+        _pessoa(
+            "censo_A",
+            "FRANSI",
+            nome="FRANSISKA SIUVA KARVALU",
+            mae="MARIA SILVA CARVALHO",
+            data="1965-05-25",
+        ),
+        _pessoa(
+            "cpf_X",
+            "FRANSI",
+            origem="cpf",
+            nome="FRANSISKA SIUVA KARVALU",
+            mae="MARIA CRISTINA SILVA CARVALHO",
+            data="1961-05-05",
+        ),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(con, [("censo_A", "cpf_X", 0.499)])
+    lista = _escada(con)
+    con.close()
+    assert lista["censo_A"] == ("cpf_X", 0.475, "mae")
+
+
+def test_baixa_nota_contem_2_tokens_mae_frequente_fica_fora() -> None:
+    con = duckdb.connect()
+    pessoas = _maes_top10()
+    pessoas += [
+        _pessoa(
+            "censo_A",
+            "ANA",
+            mae="MARIA SILVA",
+            data="1965-05-25",
+        ),
+        _pessoa(
+            "cpf_X",
+            "ANA",
+            origem="cpf",
+            mae="MARIA CRISTINA SILVA",
+            data="1961-05-05",
+        ),
+    ]
+    _criar_pessoas_escada(con, pessoas)
+    _preds(con, [("censo_A", "cpf_X", 0.499)])
     lista = _escada(con)
     con.close()
     assert "censo_A" not in lista
