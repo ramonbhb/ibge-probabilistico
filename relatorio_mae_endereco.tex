@@ -1,0 +1,556 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{setspace}
+
+\geometry{margin=2.2cm}
+\setlist[itemize]{leftmargin=*}
+\setlist[enumerate]{leftmargin=*}
+\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue,citecolor=black}
+
+\title{Pareamento probabilístico Censo\,$\times$\,CPF\\
+\large Modelo com nome da mãe e endereço\\
+\large Recorte UF\,21}
+\author{Projeto probabilístico --- IBGE}
+\date{Outubro de 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+%----------------------------------------------------------------------
+\section{Introdução}
+%----------------------------------------------------------------------
+
+Este relatório descreve o pipeline de \emph{record linkage} entre o Censo
+Demográfico~2022 e a base de CPF, no recorte da UF\,21 (Maranhão). O objetivo
+operacional é atribuir, a cada pessoa do Censo elegível, no máximo um CPF, com
+controle de falso positivo e cobertura aceitável.
+
+A abordagem é probabilística (Splink, \texttt{link\_only}): o modelo estima a
+probabilidade de match de cada par candidato e uma etapa posterior de
+\emph{associação} transforma essas notas em atribuições 1:1 (com teto de até
+três Censos por CPF).
+
+Em relação à versão anterior do pipeline---em que a mãe entrava apenas como
+prova na atribuição---esta versão inclui \textbf{nome da mãe} e
+\textbf{endereço} (logradouro, CEP, município) diretamente no \emph{score} do
+modelo, e remove a UF do score. Abaixo de $p = 0{,}90$, a atribuição exige
+corroboradores explícitos (regras R1/R2/R3) para não repetir um piso solto de
+nota.
+
+A validação principal usa uma lista de ouro 1:1 (pares Censo--CPF conhecidos).
+As métricas reportadas de falso positivo e falso negativo são as da
+\emph{associação} final, não as curvas pairwise do Splink.
+
+%----------------------------------------------------------------------
+\section{Pipeline e notebooks}
+%----------------------------------------------------------------------
+
+O fluxo é sequencial. Treino e aplicação são separados: o modelo é estimado no
+limpo completo; a predição operacional roda no limpo \emph{sem} a lista ouro
+determinística de exclusão.
+
+\subsection{Preparação e diagnóstico}
+
+\begin{description}[style=nextline]
+  \item[\texttt{00\_preparar\_bases}]
+    Importa bronze Censo + CPF, filtra UF/município, infere mãe, CEP e
+    logradouro (CNEFE), carimba \texttt{cpf\_norm} da coorte no Censo e grava
+    \texttt{censo\_registros} / \texttt{cpf\_registros} (sem empilhar as
+    fontes).
+  \item[\texttt{00b\_limpar\_dados}]
+    Limpeza (óbito, nome obrigatório, sentinelas~$\to$~NULL) produz
+    \texttt{censo\_limpo} / \texttt{cpf\_limpo}. Remove a lista ouro
+    operacional da aplicação
+    (\texttt{*\_limpo\_aplicacao}).
+  \item[\texttt{01} / \texttt{01b}]
+    Análise descritiva no limpo cheio (treino) e no limpo de aplicação.
+\end{description}
+
+\subsection{Modelo mãe + endereço}
+
+\begin{description}[style=nextline]
+  \item[\texttt{02c\_treinar\_splink\_mae\_endereco}]
+    Define comparisons, estima prior, $u$, $m$ e EM; grava
+    \texttt{splink\_model\_mae\_endereco.json}.
+  \item[\texttt{02d\_aplicar\_splink\_mae\_endereco}]
+    Carrega o JSON, aplica as 14 regras de blocking de predição e faz
+    \texttt{predict} com $p \ge 0{,}25$ no limpo de aplicação; exporta
+    \texttt{splink\_predictions\_mae\_endereco.parquet}.
+\end{description}
+
+\subsection{Atribuição e avaliação}
+
+\begin{description}[style=nextline]
+  \item[\texttt{04\_atribuir\_mae\_endereco}]
+    Escada modelo / resgate / baixo (R1--R3) com teto cumulativo de 3 Censos
+    por CPF; exporta \texttt{splink\_atribuicao\_mae\_endereco.parquet}.
+  \item[\texttt{05\_avaliar\_mae\_endereco}]
+    Cobertura, qualidade dos atribuídos, decomposição dos sem CPF e amostras
+    por faixa/regra.
+  \item[\texttt{06\_numeros\_finais}]
+    Fatias no \texttt{censo\_limpo}: lista ouro + pareamento + sem CPF.
+  \item[\texttt{03c\_avaliar\_lista\_ouro\_mae\_endereco}]
+    Validação na lista de ouro de avaliação: mesmo modelo, blocking e
+    atribuição do pipeline; pacote recall / precisão / FP / FN.
+\end{description}
+
+Notebooks da escada antiga (\texttt{02}, \texttt{02b}, \texttt{04},
+\texttt{03b}, \texttt{04b}--\texttt{04e}) permanecem no repositório como
+referência da versão anterior e não entram nos números deste relatório.
+
+%----------------------------------------------------------------------
+\section{Variáveis escolhidas}
+%----------------------------------------------------------------------
+
+O Splink compara quatro conceitos (comparisons). A UF \textbf{não} entra no
+score nesta versão.
+
+\subsection{Nome completo fonético (\texttt{nome\_completo\_phon})}
+
+Níveis (do mais forte ao ELSE), com ajuste de frequência no match exato:
+
+\begin{itemize}
+  \item match exato;
+  \item prefixo de tokens ($\ge 2$ tokens);
+  \item Damerau--Levenshtein $\le 1$ no nome completo;
+  \item um token diferente com DL $\le 2$ (último token igual);
+  \item até dois tokens com DL $\le 2$;
+  \item um token a mais/menos;
+  \item mesmos tokens em ordem diferente;
+  \item último token igual e Jaro--Winkler $\ge 0{,}95$ / $\ge 0{,}92$;
+  \item ELSE.
+\end{itemize}
+
+\subsection{Data de nascimento (\texttt{data\_nascimento})}
+
+Null conjunto (data e partes/idade); match exato com TF; mês/dia trocados;
+dia diferente; mês diferente; ano $\pm 1$; DL $\le 1$ e $\le 2$ na data;
+demais diferenças com datas presentes; fallback por idade exata / $|\Delta|=1$;
+ELSE.
+
+\subsection{Nome da mãe (\texttt{nome\_mae\_phon})}
+
+Null; match exato com TF; nível \textbf{Contida} (tokens do nome mais curto
+todos no mais longo, $\ge 2$ tokens); mesmos tokens em ordem diferente;
+Jaro--Winkler $\ge 0{,}92$ e $\ge 0{,}85$; ELSE.
+
+\subsection{Endereço composto (\texttt{endereco})}
+
+Null / não comparável; logradouro+CEP exact; logradouro+município exact;
+logradouro similar (JW~$\ge 0{,}90$) + CEP exact; CEP exact; ELSE.
+
+Colunas auxiliares usadas em blocking e nas regras de associação (não são
+comparisons próprias): \texttt{primeiro\_nome\_phon},
+\texttt{ultimo\_nome\_phon}, partes da data, \texttt{sexo},
+\texttt{cod\_municipio}, \texttt{cep}, \texttt{logradouro\_norm},
+\texttt{idade}.
+
+%----------------------------------------------------------------------
+\section{Regras de treinamento}
+%----------------------------------------------------------------------
+
+Tipo de linkage: \texttt{link\_only} (Censo $\times$ CPF). Treino no limpo
+completo.
+
+\subsection{Prior e $u$}
+
+\begin{itemize}
+  \item Regras determinísticas do prior (distintas da predição):
+        \texttt{cpf\_norm}; \texttt{nome\_completo\_phon} +
+        \texttt{data\_nascimento}. Recall assumido $0{,}7$.
+  \item $u$ por amostragem aleatória de pares
+        (\texttt{U\_MAX\_PAIRS} $= 5{\cdot}10^8$).
+\end{itemize}
+
+\subsection{Estimativa de $m$ e EM}
+
+\begin{enumerate}
+  \item $m$ direto pela coluna \texttt{cpf\_norm}
+        (\texttt{estimate\_m\_from\_label\_column}).
+  \item EM em \texttt{data\_nascimento} + \texttt{sexo} (treina comparação de
+        nome; $u$ fixo; até $10^7$ pares).
+  \item EM em primeiro+último nome (treina comparação de data).
+  \item EM em nome completo + data (treina comparação de mãe).
+  \item EM em primeiro+último + data (treina comparação de endereço).
+\end{enumerate}
+
+Há ainda uma sessão diagnóstica com sexo no bloco de data, que \textbf{não}
+fica no modelo salvo. O JSON final é
+\texttt{splink\_model\_mae\_endereco.json}.
+
+%----------------------------------------------------------------------
+\section{Blocking de predição}
+%----------------------------------------------------------------------
+
+As 14 regras abaixo geram candidatos no \texttt{predict} (união OR). Não são
+o blocking do prior nem do EM. Ficam de fora \texttt{nome\_meio} e
+\texttt{cpf\_norm} na predição (quem não tem meio sumiria; CPF na predição
+circularia a validação).
+
+\begin{enumerate}[leftmargin=*,itemsep=0.15em]
+  \item \texttt{nome\_completo\_phon}
+  \item primeiro + último + ano
+  \item primeiro + último + mês + dia
+  \item primeiro + último + mês + ano
+  \item primeiro + data completa
+  \item último + data completa
+  \item primeiro + mês + dia + município
+  \item primeiro + mês + ano + município
+  \item último + mês + dia + sexo + CEP
+  \item último + mês + ano + sexo + CEP
+  \item último + ano + mês + sexo + primeiro ``parecido''
+        (Damerau--Levenshtein proporcional, comprimento $\ge 6$)
+  \item primeiro + último + município + sexo + $|\Delta$idade$| \le 1$
+  \item logradouro + CEP + município + sexo + $|\Delta$idade$| \le 1$
+  \item mãe fonética + município + sexo + $|\Delta$idade$| \le 1$
+\end{enumerate}
+
+Na aplicação (UF\,21), o predict grava pares com $p \ge 0{,}25$.
+
+%----------------------------------------------------------------------
+\section{Regras de associação}
+%----------------------------------------------------------------------
+
+A associação transforma pares pontuados em atribuições. Um Censo recebe no
+máximo um CPF; um CPF recebe no máximo três Censos (teto cumulativo entre
+faixas). Em cada faixa, escolhe-se o melhor par elegível por $p$ e desempate
+(mãe preenchida, logradouro, CEP).
+
+\subsection{Faixas}
+
+\begin{center}
+\begin{tabular}{@{}llp{7.2cm}@{}}
+\toprule
+Faixa & Nota $p$ & Decisão \\
+\midrule
+modelo & $p \ge 0{,}90$ & aceita pelo score \\
+resgate & $0{,}50 \le p < 0{,}90$ & R1 ou R2 ou R3 \\
+baixo & $0{,}25 \le p < 0{,}50$ & R1 forte ou R2 (\textbf{sem R3}) \\
+--- & $p < 0{,}25$ & não resgata \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Corroboradores}
+
+\begin{description}
+  \item[R1]
+    Data exata + primeiro nome compatível (igual ou Levenshtein $\le 1$) +
+    (nome contido \textbf{ou} cobertura de tokens $\ge 0{,}75$; no baixo,
+    cobertura $\ge 0{,}80$).
+  \item[R2]
+    Nome completo igual/contido + data plausível distinta da exata:
+    $|\Delta$dias$| \le 1$, ou mesmo dia/mês com $|\Delta$ano$| \in \{1,10\}$.
+  \item[R3]
+    Primeiro compatível + cobertura nominal $\ge 0{,}55$ + mãe presente +
+    Jaro--Winkler da mãe $\ge 0{,}75$. Somente no resgate
+    ($0{,}50$--$0{,}90$).
+\end{description}
+
+A remoção de R3 do baixo veio de amostras com nome forte, mãe parecida e data
+distante (risco clássico de falso positivo).
+
+%----------------------------------------------------------------------
+\section{Resultados}
+%----------------------------------------------------------------------
+
+\subsection{Cobertura na aplicação (UF\,21)}
+
+Universo de aplicação: $6{.}079{.}030$ Censos (já sem a lista ouro
+determinística de exclusão).
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Versão & Atribuídos & Cobertura \\
+\midrule
+Escada antiga (mãe só na atribuição) & $4{.}092{.}388$ & $67{,}3\%$ \\
+Piso simples $0{,}50$ (sem corroborador) & $4{.}352{.}929$ & $71{,}6\%$ \\
+\textbf{Modelo + resgate + baixo (esta versão)} & $\mathbf{4{.}304{.}328}$ & $\mathbf{70{,}8\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+No \texttt{censo\_limpo}: lista ouro $7{,}8\%$, pareamento $65{,}3\%$, sem CPF
+$26{,}9\%$ ($nos\_dois = 0$).
+
+\subsubsection{Origem das atribuições}
+
+\begin{center}
+\begin{tabular}{@{}llrr@{}}
+\toprule
+Faixa & Regra & $n$ & \% dos atribuídos \\
+\midrule
+modelo & score & $4{.}130{.}020$ & $96{,}0\%$ \\
+resgate & R1 & $62{.}354$ & $1{,}4\%$ \\
+resgate & R2 & $20{.}897$ & $0{,}5\%$ \\
+resgate & R3 & $20{.}040$ & $0{,}5\%$ \\
+baixo & R1 & $62{.}882$ & $1{,}5\%$ \\
+baixo & R2 & $8{.}135$ & $0{,}2\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Resgate+baixo = $174{.}308$ ($4{,}0\%$). Quase tudo é modelo alto.
+
+\subsubsection{Sem CPF (melhor $p$)}
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Melhor $p$ & $n$ & \% aplicação \\
+\midrule
+$\ge 0{,}50$ & $119{.}281$ & $2{,}0\%$ \\
+$0{,}25$--$0{,}50$ & $132{.}252$ & $2{,}2\%$ \\
+$0{,}05$--$0{,}25$ & $242{.}856$ & $4{,}0\%$ \\
+sem par & $1{.}280{.}313$ & $21{,}1\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Dos $\sim$119\,k com $p \ge 0{,}50$ sem CPF, apenas 386 caem no teto; o resto
+falhou R1/R2/R3. O buraco dominante é blocking ($1{,}28$\,M sem par).
+
+\subsection{Falsos positivos e falsos negativos (lista de ouro)}
+
+Validação no notebook \texttt{03c}: $G = 661{.}722$ pares 1:1 no limpo.
+Métricas = associação final do pipeline completo (modelo + resgate + baixo).
+
+\subsubsection{Definições}
+
+\begin{itemize}
+  \item \textbf{Acerto} (\texttt{associou\_cpf\_ouro}): associação com o CPF da
+        verdade.
+  \item \textbf{FP da associação}: associou outro CPF
+        ($\mathrm{FP} = 1 - \mathrm{precisão}$ entre quem associou).
+  \item \textbf{FN}: não associou o CPF ouro ($1 - \mathrm{recall}$); inclui
+        quem associou errado, quem teve par abaixo da elegibilidade, e quem
+        não entrou no predict.
+  \item \textbf{Recall do par no predict}: o par ouro aparece no parquet com
+        $p \ge 0{,}25$ (blocking + score, sem atribuição).
+\end{itemize}
+
+\subsubsection{Pacote principal}
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Métrica & v1 (escada antiga) & v2 (mãe+endereço) \\
+\midrule
+Recall associação & $86{,}49\%$ & $\mathbf{91{,}67\%}$ \\
+FN & $13{,}51\%$ & $\mathbf{8{,}33\%}$ \\
+Precisão associação & $98{,}89\%$ & $\mathbf{99{,}37\%}$ \\
+FP associação & $1{,}11\%$ & $\mathbf{0{,}63\%}$ \\
+FP da escolha (antes do teto) & --- & $0{,}63\%$ \\
+Recall do par ouro no predict & $92{,}03\%$ & $94{,}18\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Na ouro, o teto não retirou ninguém (FP da escolha = FP da associação).
+Associações: $610{.}410$ (modelo $590{.}519$ + resgate $9{.}315$ + baixo
+$10{.}576$).
+
+\subsubsection{Decomposição do FN}
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Corte & $n$ & \% da ouro \\
+\midrule
+Associou CPF ouro (acerto) & $606{.}585$ & $91{,}67\%$ \\
+Associou CPF errado (FP e FN) & $3{.}825$ & $0{,}58\%$ \\
+Teve par, não elegível / abaixo & $14{.}473$ & $2{,}19\%$ \\
+Nenhum par no predict & $36{.}839$ & $5{,}57\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Leitura do FN ($55{.}137$ pessoas = $8{,}33\%$):
+\begin{itemize}
+  \item $67\%$ blocking vazio (\texttt{nenhum\_par});
+  \item $26\%$ candidato existiu mas não passou na escada;
+  \item $7\%$ associação ao CPF errado.
+\end{itemize}
+
+\subsubsection{Quadrantes nome $\times$ data (par ouro)}
+
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Recorte & $n$ & Recall & FP associação \\
+\midrule
+nome $\neq$, DOB $=$ & $152{.}038$ & $73{,}44\%$ & $1{,}12\%$ \\
+nome $=$, DOB $\neq$ & $38{.}509$ & $67{,}03\%$ & $1{,}93\%$ \\
+nome $=$, DOB $=$ & $471{.}175$ & $99{,}56\%$ & $0{,}44\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+O ganho vs.\ v1 concentra-se em nome diferente com data igual (antes
+$\sim 54\%$ de recall). O caso fácil permanece $\sim 99{,}5\%$.
+
+\subsubsection{Nota sobre curvas Splink}
+
+ROC / Precision--Recall com rótulos clericais medem ranking pairwise, não a
+associação 1:1. Nesta rodada há poucos rivais no predict frente aos positivos
+ouro; a curva PR pode parecer atípica. Os números operacionais são os do
+pacote de associação acima.
+
+%----------------------------------------------------------------------
+\section{Limitações e o teto de cobertura ($\sim$71\%)}
+%----------------------------------------------------------------------
+
+Na aplicação, $70{,}8\%$ dos Censos receberam CPF. Os $29{,}2\%$ restantes
+($1{.}774{.}702$ pessoas) \textbf{não} são um único fenômeno: a maior parte
+nunca vira candidato no pareamento; uma fatia menor chega ao score e é
+segurada de propósito pela associação.
+
+\subsection{Decomposição dos sem CPF}
+
+Entre quem ficou sem CPF, o melhor par no parquet de predição se parte assim:
+
+\begin{center}
+\begin{tabular}{@{}lrrp{6.2cm}@{}}
+\toprule
+Situação & $n$ & \% aplicação & Leitura \\
+\midrule
+Sem par no predict & $1{.}280{.}313$ & $21{,}1\%$ & blocking / piso do predict \\
+Melhor $p$ em $[0{,}05;\,0{,}25)$ & $242{.}856$ & $4{,}0\%$ & candidato fraco \\
+Melhor $p$ em $[0{,}25;\,0{,}50)$ & $132{.}252$ & $2{,}2\%$ & nota média, sem R1/R2 \\
+Melhor $p \ge 0{,}50$ & $119{.}281$ & $2{,}0\%$ & nota boa, falhou R1/R2/R3
+  (só 386 no teto de 3) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Ou seja: \textbf{$\sim$3 em cada 4 sem CPF} estão no bloco
+``sem par'' ($1{,}28$\,M / $1{,}77$\,M). Afrouxar o piso do modelo ou as
+regras R1--R3 move no máximo os $\sim$8\% da aplicação que já têm candidato
+com alguma nota; não mexe no buraco de $21$\,p.p.
+
+\subsection{Por que $1{,}28$\,milhões não entram no pareamento}
+
+``Sem par'' significa: para aquele Censo, o \texttt{predict} não devolveu
+nenhuma linha no parquet (nas 14 regras OR, contra o CPF limpo do estado).
+Na prática isso junta dois efeitos, com o primeiro dominando:
+
+\begin{enumerate}
+  \item \textbf{Recall do blocking.}
+    As regras exigem coincidência em combinações de nome fonético (completo,
+    primeiro, último), partes da data, sexo, município, CEP, logradouro ou
+    mãe. Quem tem nome muito divergente entre Censo e CPF, data ausente ou
+    inconsistente, primeiro/último vazios, ou endereço/mãe sem preenchimento
+    útil, simplesmente \emph{não gera candidato}---o modelo nunca vê o par.
+  \item \textbf{Piso do predict.}
+    Pares que só existiriam com nota muito baixa podem nem ser materializados,
+    conforme o limiar exportado. Isso é secundário frente ao volume sem
+    qualquer regra de bloco.
+\end{enumerate}
+
+Motivos estruturais por trás do miss de blocking (não são ``bug'' da escada):
+
+\begin{itemize}
+  \item qualidade e cobertura dos campos (mãe $\sim$34\% no Censo vs.\
+        $\sim$97\% no CPF; logradouro/CEP com missings e normalização
+        difícil);
+  \item variação ortográfica/fonética além do que as 14 regras capturam;
+  \item pessoas do Censo sem correspondente real ou encontrável no CPF do
+        estado (óbito já filtrado à montante, migração, base incompleta,
+        identificadores ruins);
+  \item regras geográficas (município/CEP) que não disparam quando o endereço
+        diverge ou está vazio---e aí a regra de mãe também não salva se a mãe
+        estiver ausente no Censo.
+\end{itemize}
+
+Na lista de ouro o quadro é mais fácil: o recall do \emph{par} no predict já
+é $94{,}2\%$ (só $5{,}6\%$ sem par). A ouro é uma população com par verdadeiro
+1:1 conhecido; a aplicação inclui o caso médio e o caso difícil. Por isso a
+ouro não ``promete'' 94\% de cobertura operacional.
+
+\subsection{Por que a cobertura estabiliza perto de 71\%}
+
+O teto observado não é arbitrário:
+
+\begin{enumerate}
+  \item \textbf{Teto do pareamento.}
+    Mesmo um piso simples $p \ge 0{,}50$ \emph{sem} corroborador chegou a
+    $71{,}6\%$---apenas $0{,}8$\,p.p.\ acima desta versão ($70{,}8\%$). Ou seja,
+    com o blocking e o modelo atuais, há pouco a ganhar em cobertura sem
+    mudar a geração de candidatos.
+  \item \textbf{Escolha anti-FP.}
+    Dos $\sim$119\,k com melhor $p \ge 0{,}50$ ainda sem CPF, quase todos
+    falharam R1/R2/R3 (teto de 3 explica só 386). Essa fatia ($2{,}0\%$ da
+    aplicação) é o preço explícito de não aceitar nota média/alta sem âncora.
+    Na ouro, o mesmo desenho entrega FP de associação $0{,}63\%$ (vs.\
+    $1{,}11\%$ na v1).
+  \item \textbf{Faixa intermediária.}
+    Outros $\sim$375\,k ($6{,}2\%$ da aplicação) têm algum par com
+    $0{,}05 \le p < 0{,}50$: o modelo já duvida. Empurrá-los para atribuição
+    sobe cobertura e muda o tipo de erro (homônimo / data frágil).
+\end{enumerate}
+
+Em uma conta fechada da aplicação:
+
+\[
+\begin{aligned}
+70{,}8\% &\quad\text{atribuídos (modelo + resgate + baixo)}\\
++\ 2{,}0\% &\quad p\ge 0{,}50\text{ sem regra (reserva anti-FP)}\\
++\ 2{,}2\% &\quad 0{,}25\le p<0{,}50\\
++\ 4{,}0\% &\quad 0{,}05\le p<0{,}25\\
++\ 21{,}1\% &\quad\text{sem par (limite de blocking)}\\
+&= 100\%.
+\end{aligned}
+\]
+
+\subsection{O que esta versão não resolve (e o que resolveria)}
+
+\begin{itemize}
+  \item \textbf{Não resolve} o $1{,}28$\,M sem afrouxar ou redesenhar blocking
+        (novas chaves, tolerância fonética maior, uso mais agressivo de mãe/
+        endereço quando preenchidos, ou um segundo estágio de candidatos).
+  \item \textbf{Não deve} ser lido como falha da atribuição: 96\% do que foi
+        atribuído veio de $p \ge 0{,}90$, com FP baixo na ouro.
+  \item \textbf{Caminhos para subir cobertura} com risco controlado: melhorar
+        recall do blocking (prioridade); enriquecer mãe/endereço no Censo;
+        só depois revisar R1--R3 ou o piso $0{,}90$ com validação ouro em
+        mãos.
+  \item \textbf{Limite externo:} o linkage não cria CPF inexistente nem
+        corrige registro irrecuperável---parte do gap de $\sim$29\% é
+        cobertura de bases e qualidade de dado, não só método.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\section{Conclusão}
+%----------------------------------------------------------------------
+
+O pipeline com mãe e endereço no score, piso de modelo $p \ge 0{,}90$ e
+resgate/baixo com corroboradores R1/R2/(R3 só no meio) é a versão recomendada
+para a UF\,21:
+
+\begin{itemize}
+  \item cobertura de aplicação $70{,}8\%$ ($+3{,}5$\,p.p.\ vs.\ escada antiga);
+  \item na lista de ouro, recall sobe ($86{,}5\% \to 91{,}7\%$) e FP da
+        associação cai ($1{,}11\% \to 0{,}63\%$);
+  \item $96\%$ das atribuições vêm do modelo alto; o resgate é fino e
+        ancorado;
+  \item o teto perto de 71\% é sobretudo \textbf{blocking}
+        ($1{,}28$\,M / $21\%$ sem par): a atribuição só explica $\sim$2\,p.p.\
+        de reserva anti-FP; o piso $0{,}50$ solto já mostrava que não há
+        muito mais cobertura barata com os candidatos atuais.
+\end{itemize}
+
+\end{document}
