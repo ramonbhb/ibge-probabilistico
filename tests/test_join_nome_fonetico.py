@@ -91,6 +91,85 @@ def test_sem_phon_no_staging_falha() -> None:
     con.close()
 
 
+def test_sem_mae_phon_no_staging_calcula_fonetica() -> None:
+    """Sem coluna bronze de mãe fonética, materialize usa phonetic_name_sql."""
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE censo_staging (
+            person_id_censo VARCHAR,
+            id_domicilio VARCHAR,
+            nome_completo_raw VARCHAR,
+            nome_mae_inferido VARCHAR,
+            data_nascimento VARCHAR,
+            sexo_raw VARCHAR,
+            idade INTEGER,
+            cep VARCHAR,
+            uf VARCHAR,
+            cod_municipio VARCHAR,
+            nome_completo_phon VARCHAR
+        )
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO censo_staging VALUES
+        ('1', 'd1', 'Ana Silva', 'Angelica Vargas', '1990-01-02',
+         '2', 32, '65000000', '21', '2111300', 'ANA SILVA')
+        """
+    )
+    materialize_censo_registros(con)
+    nome_mae, nome_mae_phon, primeiro_phon = con.execute(
+        """
+        SELECT nome_mae, nome_mae_phon, primeiro_nome_mae_phon
+        FROM censo_registros
+        """
+    ).fetchone()
+    con.close()
+    assert nome_mae == "ANGELICA VARGAS"
+    assert nome_mae_phon == full_name_phon_basic("ANGELICA VARGAS")
+    assert nome_mae_phon != nome_mae
+    assert primeiro_phon == full_name_phon_basic("ANGELICA")
+
+
+def test_com_mae_phon_no_staging_usa_join() -> None:
+    """Se o staging trouxe nome_mae_phon do join, não recalcula."""
+    con = duckdb.connect()
+    con.execute(
+        """
+        CREATE TABLE censo_staging (
+            person_id_censo VARCHAR,
+            id_domicilio VARCHAR,
+            nome_completo_raw VARCHAR,
+            nome_mae_inferido VARCHAR,
+            data_nascimento VARCHAR,
+            sexo_raw VARCHAR,
+            idade INTEGER,
+            cep VARCHAR,
+            uf VARCHAR,
+            cod_municipio VARCHAR,
+            nome_completo_phon VARCHAR,
+            nome_mae_phon VARCHAR
+        )
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO censo_staging VALUES
+        ('1', 'd1', 'Ana Silva', 'Angelica Vargas', '1990-01-02',
+         '2', 32, '65000000', '21', '2111300', 'ANA SILVA',
+         'ANGELIKA BRONZE')
+        """
+    )
+    materialize_censo_registros(con)
+    nome_mae_phon = con.execute(
+        "SELECT nome_mae_phon FROM censo_registros"
+    ).fetchone()[0]
+    con.close()
+    assert nome_mae_phon == "ANGELIKA BRONZE"
+    assert nome_mae_phon != full_name_phon_basic("ANGELICA VARGAS")
+
+
 def test_registros_copia_logr_sem_numero() -> None:
     con = duckdb.connect()
     con.execute(

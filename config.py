@@ -372,9 +372,10 @@ CPF_COL_NUM_LOGRADOURO = "NUM_LOGRADOURO"
 # Opcional no bronze: o NB00 detecta a presença e cai para NULL se não existir.
 CPF_COL_ANO_OBITO = "ANO_OBITO"
 
-# Parquets de nome já fonético. Confira no DESCRIBE do 00; MAE vazio = não entra.
+# Parquets de nome já fonético (pessoa). Confira no DESCRIBE do 00.
 # cpf_cpf_nome: COD_CPF (chave), cpf_nome (grafia, não entra no join),
 # cpf_nome_fonetico (vira nome_completo_phon).
+# MAE vazio = bronze sem mãe fonética → materialize calcula com phonetic_name_sql.
 CENSO_NOME_COL_ID = "ID_MORADOR"
 CENSO_NOME_COL_PHON = "pes_nome_fonetico"
 CENSO_NOME_COL_MAE_PHON = ""
@@ -942,6 +943,9 @@ def materialize_censo_registros(
 
     `nome_completo_phon` já veio do join com censo_pes_nome. Aqui só limpa e
     parte primeiro/meio/último (limpo e fonético).
+
+    Mãe: se o staging trouxe `nome_mae_phon` do join bronze, usa; senão calcula
+    com `phonetic_name_sql` a partir do nome limpo (não copiar `nome_mae_norm`).
     """
     from features import (
         NOME_MAE_COLUMNS,
@@ -958,7 +962,10 @@ def materialize_censo_registros(
             f"{staging_table} sem nome_completo_phon; "
             "faça o LEFT JOIN com censo_pes_nome no 00."
         )
-    mae_phon_col = "nome_mae_phon" if "nome_mae_phon" in cols else "nome_mae_norm"
+    # Bronze (censo_pes_nome) hoje não traz mãe fonética; MAE_PHON vazio no config.
+    mae_phon_kw = (
+        {"phon_col": "nome_mae_phon"} if "nome_mae_phon" in cols else {}
+    )
     pessoa = name_feature_columns_sql(
         "nome_completo_norm",
         col_map=PESSOA_COLUMNS,
@@ -969,7 +976,7 @@ def materialize_censo_registros(
         for alias, expr in name_feature_columns_sql(
             "nome_mae_norm",
             col_map=NOME_MAE_COLUMNS,
-            phon_col=mae_phon_col,
+            **mae_phon_kw,
         ).items()
     }
     sexo_n = normalize_sexo_sql("sexo_raw")
