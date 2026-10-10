@@ -1,0 +1,40 @@
+{
+  "jar": "/opt/spark-python/venv/lib64/python3.11/site-packages/splink/internals/files/spark_jars/scala-udf-similarity-0.2.1_spark4.x.jar",
+  "checkpoint_dir": "/data/spark/shared/checkpoints",
+  "java_home": "/opt/java-21",
+  "spark_home": "/opt/spark",
+  "python": "/opt/spark-python/venv/bin/python",
+  "master": "spark://spark-master:7077",
+  "driver": {
+    "host": "172.31.184.71",
+    "bindAddress": "172.31.184.71",
+    "port": "7079"
+  },
+  "profiles": {
+    "small": {
+      "spark.cores.max": "28",
+      "spark.executor.instances": "14",
+      "spark.executor.cores": "2",
+      "spark.executor.memory": "24g",
+      "spark.executor.memoryOverhead": "4g",
+      "spark.sql.shuffle.partitions": "224",
+      "spark.default.parallelism": "224",
+      "spark.sql.adaptive.enabled": "true",
+      "spark.driver.blockManager.port": "7080",
+      "spark.blockManager.port": "0",
+      "spark.port.maxRetries": "16",
+      "spark.eventLog.enabled": "true",
+      "spark.eventLog.dir": "file:///data/spark/shared/events"
+    },
+    "full": {
+      "spark.cores.max": "42",
+      "spark.executor.instances": "21",
+      "spark.executor.cores": "2",
+      "spark.executor.memory": "36g",
+      "spark.sql.shuffle.partitions": "336",
+      "spark.default.parallelism": "336",
+      "spark.blockManager.port": "7080",
+      "spark.eventLog.dir": "file:///data/spark/shared/events"
+    }
+  }
+}

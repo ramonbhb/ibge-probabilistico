@@ -8,7 +8,7 @@ Os notebooks `02c`–`02g` com DuckDB ficam de lado.
 ### Pipeline UF21 (mãe + endereço)
 
 1. Copiar para `/data/spark/shared/datasets/`:
-   - `censo_limpo.parquet`, `cpf_limpo.parquet` (treino)
+   - `censo_limpo_uf21.parquet`, `cpf_limpo_uf21.parquet` (treino)
    - `censo_limpo_aplicacao.parquet`, `cpf_limpo_aplicacao.parquet` (apply)
 2. [`01_treinar_mae_endereco_uf21.ipynb`](01_treinar_mae_endereco_uf21.ipynb)
    → grava `splink_model_mae_endereco.json`
@@ -25,15 +25,32 @@ Os notebooks `02c`–`02g` com DuckDB ficam de lado.
 3. [`04_aplicar_luis_nacional.ipynb`](04_aplicar_luis_nacional.ipynb)
    → grava `splink_predictions_mae_endereco_luis.parquet`
 
+## Sessão Spark
+
+Config compartilhada em [`spark_cluster.json`](spark_cluster.json).
+
+Nos notebooks, troque só:
+
+```python
+CLUSTER = 'small'  # ou 'full'
+```
+
+- `small` — 28 cores / 14 executors (teste)
+- `full` — 42 cores / 21 executors (job pesado)
+
+JAR Splink via `PYSPARK_SUBMIT_ARGS` (path no JSON). Checkpoint:
+`/data/spark/shared/checkpoints`. Ajuste `driver.host` no JSON se
+rodar em outra máquina.
+
+**Reinicie o kernel** se a sessão Spark já existia sem o JAR / checkpoint /
+perfil novo.
+
 ## Requisitos no cluster
 
 - Splink 5 + PySpark
-- JAR de similaridade (`similarity_jar_location()`) no classpath — o setup
-  de cada notebook configura `spark.jars` e `addJar`
-- Checkpoint: `/data/spark/shared/checkpoints`
-- **Reinicie o kernel** se a sessão Spark já existia sem o JAR
+- Comparisons customizadas em SQL **Spark** (`split`/`size`/`jaro_winkler`), não DuckDB
 
-## Linker (padrão do cluster)
+## Linker (Splink 5.0)
 
 ```python
 db_api = SparkAPI(
@@ -41,10 +58,7 @@ db_api = SparkAPI(
     break_lineage_method='checkpoint',
     repartition_after_blocking=False,
 )
-linker = Linker(
-    [df_censo, df_cpf],
-    settings,
-    db_api,
-    input_table_aliases=['censo', 'cpf'],
-)
+censo_in = db_api.register(df_censo, dataset_display_name='censo')
+cpf_in = db_api.register(df_cpf, dataset_display_name='cpf')
+linker = Linker([censo_in, cpf_in], settings)
 ```
