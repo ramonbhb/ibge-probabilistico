@@ -25,6 +25,17 @@ Os notebooks `02c`–`02g` com DuckDB ficam de lado.
 3. [`04_aplicar_luis_nacional.ipynb`](04_aplicar_luis_nacional.ipynb)
    → grava `splink_predictions_mae_endereco_luis.parquet`
 
+### Pipeline Luis Sul
+
+Mesmos CSVs do nacional. Censo filtrado em UF 41/42/43; CPF nacional
+(mudança de UF). Coluna `uf` = prefixo de `cod_municipio`. As 6 regras
+largas de blocking exigem mesma `uf`; as demais não.
+
+1. [`05_treinar_luis_sul.ipynb`](05_treinar_luis_sul.ipynb)
+   → grava `splink_model_mae_endereco_luis_sul.json`
+2. [`06_aplicar_luis_sul.ipynb`](06_aplicar_luis_sul.ipynb)
+   → grava `splink_predictions_mae_endereco_luis_sul.parquet`
+
 ## Sessão Spark
 
 Config compartilhada em [`spark_cluster.json`](spark_cluster.json).
