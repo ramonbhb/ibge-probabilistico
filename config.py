@@ -774,13 +774,16 @@ def get_connection(
     memory_limit: str | None = None,
 ) -> duckdb.DuckDBPyConnection:
     ensure_output_dir()
-    con = duckdb.connect(str(DUCKDB_ARQUIVO))
+    # temp_directory tem que ir no connect: depois do 1º uso o DuckDB não deixa SET.
+    temp_dir = os.environ.get("DUCKDB_TEMP_DIR", str(OUTPUT_DIR / "duckdb_temp"))
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(
+        str(DUCKDB_ARQUIVO),
+        config={"temp_directory": str(temp_dir)},
+    )
     con.execute(f"PRAGMA threads={threads or DUCKDB_THREADS}")
     con.execute(f"PRAGMA memory_limit='{memory_limit or DUCKDB_MEMORY_LIMIT}'")
     con.execute("SET preserve_insertion_order = false")
-    temp_dir = os.environ.get("DUCKDB_TEMP_DIR", str(OUTPUT_DIR / "duckdb_temp"))
-    Path(temp_dir).mkdir(parents=True, exist_ok=True)
-    con.execute(f"SET temp_directory = '{temp_dir}'")
     return con
 
 
